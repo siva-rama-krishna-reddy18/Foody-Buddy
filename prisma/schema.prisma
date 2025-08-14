@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Customer {
+  phone         String          @id @db.VarChar(20)
+  name          String?         @db.VarChar(100)
+  email         String?         @db.VarChar(100)
+  city          String?         @db.VarChar(50)
+  country       String?         @db.VarChar(50)
+  line1         String?         @db.VarChar(100)
+  line2         String?         @db.VarChar(100)
+  postalCode    String?         @map("postal_code") @db.VarChar(20)
+  state         String?         @db.VarChar(50)
+  updatedAt     DateTime?       @map("updated_at") @db.Timestamp(6)
+  orders        Order[]
+  chat_sessions chat_sessions[]
+
+  @@map("customers")
+}
+
+model Product {
+  id            String   @id @db.VarChar(100)
+  name          String?  @db.VarChar(100)
+  description   String?
+  price         Decimal? @db.Decimal
+  category      String?  @db.VarChar(50)
+  availableDays String[] @map("available_days")
+  ingredients   String[]
+  groups        String[]
+
+  @@map("products")
+}
+
+model Order {
+  orderNumber            Int             @id @map("order_number")
+  orderNumberProvisional Int?            @map("order_number_provisional")
+  amount                 Decimal?        @db.Decimal
+  amountPaid             Decimal?        @map("amount_paid") @db.Decimal
+  eventPayment           Decimal?        @map("event_payment") @db.Decimal
+  createdAt              DateTime?       @map("created_at") @db.Timestamp(6)
+  paymentMethod          String?         @map("payment_method") @db.VarChar(50)
+  status                 String?         @db.VarChar(50)
+  stripePaymentIntent    String?         @map("stripe_payment_intent") @db.VarChar(100)
+  currency               String?         @db.VarChar(10)
+  groupId                String?         @map("group_id") @db.VarChar(100)
+  couponId               String?         @map("coupon_id")
+  customerId             String?         @map("customer_id")
+  orderLineItems         OrderLineItem[]
+  customer               Customer?       @relation(fields: [customerId], references: [phone], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("orders")
+}
+
+model OrderLineItem {
+  id                  Int       @id @default(autoincrement())
+  orderId             Int?      @map("order_id")
+  productId           String?   @map("product_id") @db.VarChar(100)
+  productName         String?   @map("product_name") @db.VarChar(100)
+  price               Decimal?  @db.Decimal
+  quantity            Int?
+  date                DateTime? @db.Date
+  groupId             String?   @map("group_id")
+  preference          String?   @db.VarChar(100)
+  specialInstructions String?   @map("special_instructions")
+  taxRates            String?   @map("tax_rates")
+  type                String?   @db.VarChar(50)
+  order               Order?    @relation(fields: [orderId], references: [orderNumber], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("order_line_items")
+}
+
+model Coupon {
+  id      String    @id @default(dbgenerated("nextval('coupons_id_seq'::regclass)")) @db.VarChar(100)
+  name    String?   @db.VarChar(100)
+  type    String?   @db.VarChar(50)
+  value   Decimal?  @db.Decimal
+  date    DateTime? @db.Date
+  groupId String?   @map("group_id") @db.VarChar(100)
+
+  @@map("coupons")
+}
+
+model chat_sessions {
+  id          String     @id
+  customer_id String
+  title       String?
+  created_at  DateTime   @default(now())
+  updated_at  DateTime
+  customers   Customer   @relation(fields: [customer_id], references: [phone], onDelete: Cascade)
+  messages    messages[]
+
+  @@index([customer_id, updated_at])
+  @@map("chat_sessions")
+}
+
+model messages {
+  id            String        @id
+  session_id    String
+  content       String
+  sender        String
+  message_type  String        @default("text")
+  metadata      Json?
+  created_at    DateTime      @default(now())
+  chat_sessions chat_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade)
+
+  @@index([session_id, created_at])
+  @@map("messages")
+}

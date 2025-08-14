@@ -1,0 +1,130 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Map to existing customers table (instead of creating new users)
+model Customer {
+  phone      String   @id                    // They use phone as primary key
+  name       String?
+  email      String?
+  city       String?
+  country    String?
+  line1      String?
+  line2      String?
+  postalCode String?  @map("postal_code")
+  state      String?
+  updatedAt  DateTime? @map("updated_at")
+  
+  // Add relationship to new chat tables
+  chatSessions ChatSession[]
+  orders       Order[]
+  
+  @@map("customers")  // Map to existing table
+}
+
+// Map to existing products table
+model Product {
+  id             String   @id
+  name           String?
+  description    String?
+  price          Decimal?
+  category       String?
+  availableDays  String[] @map("available_days")
+  ingredients    String[]
+  groups         String[]
+  
+  orderLineItems OrderLineItem[]
+  
+  @@map("products")  // Map to existing table
+}
+
+// Map to existing orders table
+model Order {
+  orderNumber            Int      @id @map("order_number")
+  orderNumberProvisional Int?     @map("order_number_provisional")
+  amount                 Decimal?
+  amountPaid            Decimal? @map("amount_paid")
+  eventPayment          Decimal? @map("event_payment")
+  createdAt             DateTime? @map("created_at")
+  paymentMethod         String?  @map("payment_method")
+  status                String?
+  stripePaymentIntent   String?  @map("stripe_payment_intent")
+  currency              String?
+  groupId               String?  @map("group_id")
+  couponId              String?  @map("coupon_id")
+  customerId            String?  @map("customer_id")
+  
+  customer       Customer?       @relation(fields: [customerId], references: [phone])
+  orderLineItems OrderLineItem[]
+  
+  @@map("orders")  // Map to existing table
+}
+
+// Map to existing order_line_items table
+model OrderLineItem {
+  id                   Int      @id @default(autoincrement())
+  orderId             Int?     @map("order_id")
+  productId           String?  @map("product_id")
+  productName         String?  @map("product_name")
+  price               Decimal?
+  quantity            Int?
+  date                DateTime? @db.Date
+  groupId             String?  @map("group_id")
+  preference          String?
+  specialInstructions String?  @map("special_instructions")
+  taxRates            String?  @map("tax_rates")
+  type                String?
+  
+  order   Order?   @relation(fields: [orderId], references: [orderNumber])
+  product Product? @relation(fields: [productId], references: [id])
+  
+  @@map("order_line_items")  // Map to existing table
+}
+
+// Map to existing coupons table
+model Coupon {
+  id      String   @id @default(cuid())
+  name    String?
+  type    String?
+  value   Decimal?
+  date    DateTime? @db.Date
+  groupId String?  @map("group_id")
+  
+  @@map("coupons")  // Map to existing table
+}
+
+// NEW TABLE: Chat Sessions (you'll create this)
+model ChatSession {
+  id         String   @id @default(uuid())
+  customerId String   @map("customer_id")  // Link to existing customers via phone
+  title      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  
+  customer Customer @relation(fields: [customerId], references: [phone], onDelete: Cascade)
+  messages Message[]
+  
+  @@index([customerId, updatedAt])
+  @@map("chat_sessions")
+}
+
+// NEW TABLE: Messages (you'll create this)
+model Message {
+  id          String   @id @default(uuid())
+  sessionId   String   @map("session_id")
+  content     String
+  sender      String   // 'customer' or 'ai'
+  messageType String   @default("text") @map("message_type")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  @@index([sessionId, createdAt])
+  @@map("messages")
+}
