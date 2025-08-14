@@ -128,3 +128,5 @@ model Message {
   @@index([sessionId, createdAt])
   @@map("messages")
 }
+
+

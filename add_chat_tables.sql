@@ -25,3 +25,4 @@ CREATE INDEX IF NOT EXISTS messages_session_id_created_at_idx ON messages(sessio
 ALTER TABLE chat_sessions ADD CONSTRAINT chat_sessions_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customers(phone) ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE messages ADD CONSTRAINT messages_session_id_fkey FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
