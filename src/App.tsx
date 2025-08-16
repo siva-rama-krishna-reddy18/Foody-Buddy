@@ -1,22 +1,12 @@
-import { useEffect, useState } from 'react';
-import { Routes, Route } from 'react-router-dom';
-import Home from './pages/Home';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import Chat from './pages/Chat';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import ProtectedRoute from './components/auth/ProtectedRoute';
 
 function App() {
   return (
     <div className="p-4">
       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-
-        <Route element={<ProtectedRoute />}>
-          <Route path="/chat" element={<Chat />} />
-        </Route>
+        <Route path="/" element={<Navigate to="/chat" replace />} />
+        <Route path="/chat" element={<Chat />} />
       </Routes>
     </div>
   );

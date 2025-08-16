@@ -1,15 +1,13 @@
-import MessageList from './MessageList'
-import MessageInput from './MessageInput'
+import MessageList from './MessageList';
+import MessageInput from './MessageInput';
+import ConnectionStatus from './ConnectionStatus';
 
 export default function ChatContainer() {
   return (
-    <div className="flex flex-col h-full border rounded-lg shadow-lg">
-      <div className="flex-1 overflow-y-auto">
-        <MessageList />
-      </div>
-      <div className="p-2 border-t">
-        <MessageInput />
-      </div>
+    <div className="flex flex-col h-full max-w-2xl mx-auto border rounded-lg">
+      <ConnectionStatus />
+      <MessageList />
+      <MessageInput />
     </div>
-  )
+  );
 }

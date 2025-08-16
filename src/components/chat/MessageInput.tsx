@@ -1,32 +1,31 @@
-import { useState } from 'react'
-import { useChatStore } from '../../stores/useChatStore'
+import { useState } from 'react';
+import { useChatStore } from '../../stores/useChatStore';
 
 export default function MessageInput() {
-  const [text, setText] = useState('')
-  const sendMessage = useChatStore((state) => state.sendMessage)
+  const [text, setText] = useState('');
+  const sendMessage = useChatStore((state) => state.sendMessage);
 
   const handleSend = () => {
     if (text.trim()) {
-      sendMessage(text)
-      setText('')
+      sendMessage(text);
+      setText('');
     }
-  }
+  };
 
   return (
-    <div className="flex gap-2">
+    <div className="p-4 border-t flex gap-2">
       <input
-        type="text"
+        className="flex-1 border rounded px-3 py-2"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder="Type a message..."
-        className="flex-1 border rounded-lg px-3 py-2 focus:outline-none"
+        placeholder="Type your message..."
       />
       <button
         onClick={handleSend}
-        className="bg-blue-500 text-white px-4 py-2 rounded-lg"
+        className="bg-blue-500 text-white px-4 py-2 rounded"
       >
         Send
       </button>
     </div>
-  )
+  );
 }

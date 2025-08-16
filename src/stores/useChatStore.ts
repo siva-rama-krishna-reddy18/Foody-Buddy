@@ -1,52 +1,46 @@
-import { create } from 'zustand'
-import socket from '../services/socket/socketClient'
-
-export interface Message {
-  text: string
-  sender: 'me' | 'other'
-}
+import { create } from 'zustand';
+import { api } from '../services/api/ApiClient';
+import { connectSocket, getSocket } from '../services/socket/socketClient';
+import type { ChatMessage } from 'src/types/chat';
 
 interface ChatState {
-  messages: Message[]
-  connected: boolean
-  connectSocket: () => void
-  disconnectSocket: () => void
-  sendMessage: (text: string) => void
+  messages: ChatMessage[];
+  connected: boolean;
+  connect: () => void;
+  disconnect: () => void;
+  sendMessage: (text: string) => void;
+  addMessage: (message: ChatMessage) => void;
 }
 
-export const useChatStore = create<ChatState>((set) => ({
+export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   connected: false,
 
-  connectSocket: () => {
-    socket.connect()
-
-    socket.on('connect', () => {
-      set({ connected: true })
-    })
-
-    socket.on('disconnect', () => {
-      set({ connected: false })
-    })
-
-    socket.on('message', (msg: { text: string; sender: string }) => {
-      set((state) => ({
-        messages: [...state.messages, { text: msg.text, sender: 'other' }],
-      }))
-    })
+  connect: () => {
+    const socket = connectSocket();
+    socket.on('connect', () => set({ connected: true }));
+    socket.on('disconnect', () => set({ connected: false }));
+    socket.on('chat_message', (msg: ChatMessage) => {
+      set((state) => ({ messages: [...state.messages, msg] }));
+    });
   },
 
-  disconnectSocket: () => {
-    socket.disconnect()
-    set({ connected: false })
+  disconnect: () => {
+    getSocket()?.disconnect();
+    set({ connected: false });
   },
 
   sendMessage: (text) => {
-    // Emit to backend
-    socket.emit('message', { text })
-    // Add locally so it appears instantly
-    set((state) => ({
-      messages: [...state.messages, { text, sender: 'me' }],
-    }))
+    const socket = getSocket();
+    if (socket) {
+      socket.emit('chat_message', { text, sender: 'me' });
+      set((state) => ({
+        messages: [...state.messages, { text, sender: 'me' }],
+      }));
+    }
   },
-}))
+
+  addMessage: (message) => {
+    set((state) => ({ messages: [...state.messages, message] }));
+  }
+}));
