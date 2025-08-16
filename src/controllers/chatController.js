@@ -3,8 +3,14 @@ const chatService = require('../services/chatservice');
 class ChatController {
     async createSession(req, res) {
         try {
-            const customerId = req.user.phone;  // Use phone as customer ID
-            const { title } = req.body;
+            const { customerId, title } = req.body;
+            
+            if (!customerId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Customer ID is required'
+                });
+            }
             
             const session = await chatService.createSession(customerId, title);
             
@@ -24,8 +30,14 @@ class ChatController {
     
     async getSessions(req, res) {
         try {
-            const customerId = req.user.phone;  // Use phone as customer ID
-            const { limit } = req.query;
+            const { customerId, limit } = req.query;
+            
+            if (!customerId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Customer ID is required'
+                });
+            }
             
             const sessions = await chatService.getUserSessions(customerId, limit ? parseInt(limit) : 20);
             
@@ -45,14 +57,21 @@ class ChatController {
     async getMessages(req, res) {
         try {
             const { sessionId } = req.params;
-            const { limit, offset } = req.query;
+            const { customerId, limit, offset } = req.query;
             
-            // Verify session ownership - use customer_id field
+            if (!customerId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Customer ID is required'
+                });
+            }
+            
+            // Verify session ownership
             const session = await chatService.getSessionById(sessionId);
-            if (!session || session.customer_id !== req.user.phone) {
+            if (!session || session.customer_id !== customerId) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Session not found'
+                    error: 'Session not found or access denied'
                 });
             }
             
@@ -77,21 +96,21 @@ class ChatController {
     
     async sendMessage(req, res) {
         try {
-            const { sessionId, content, messageType } = req.body;
+            const { sessionId, customerId, content, messageType } = req.body;
             
-            if (!sessionId || !content) {
+            if (!sessionId || !customerId || !content) {
                 return res.status(400).json({
                     success: false,
-                    error: 'Session ID and content are required'
+                    error: 'Session ID, customer ID, and content are required'
                 });
             }
             
-            // Verify session ownership - use customer_id field
+            // Verify session ownership
             const session = await chatService.getSessionById(sessionId);
-            if (!session || session.customer_id !== req.user.phone) {
+            if (!session || session.customer_id !== customerId) {
                 return res.status(404).json({
                     success: false,
-                    error: 'Session not found'
+                    error: 'Session not found or access denied'
                 });
             }
             
@@ -100,7 +119,7 @@ class ChatController {
             // Enhanced AI response for FoodyBuddy
             const aiResponse = await chatService.saveMessage(
                 sessionId,
-                `Hello ${req.user.name}! I received your message: "${content}". I'm your FoodyBuddy AI assistant, and I have access to information about 82 delicious food products and can help you based on your order history. How can I help you with food recommendations today?`,
+                `Hello! I received your message: "${content}". I'm your FoodyBuddy AI assistant, and I have access to information about 82 delicious food products and can help you with food recommendations based on your preferences. How can I help you today?`,
                 'ai',
                 'text'
             );
@@ -121,7 +140,14 @@ class ChatController {
     async deleteSession(req, res) {
         try {
             const { sessionId } = req.params;
-            const customerId = req.user.phone;
+            const { customerId } = req.query;
+            
+            if (!customerId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Customer ID is required'
+                });
+            }
             
             await chatService.deleteSession(sessionId, customerId);
             
@@ -140,4 +166,3 @@ class ChatController {
 }
 
 module.exports = new ChatController();
-

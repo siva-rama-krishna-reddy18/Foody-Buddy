@@ -6,7 +6,6 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 require('dotenv').config();
 
-const authRoutes = require('./routes/auth');
 const chatRoutes = require('./routes/chat');
 const { errorHandler } = require('./middleware/errorHandler');
 
@@ -29,7 +28,7 @@ app.use(helmet({
 }));
 
 app.use(cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
     credentials: true
 }));
 
@@ -64,7 +63,6 @@ app.get('/', (req, res) => {
         status: 'running',
         endpoints: {
             health: '/health',
-            auth: '/api/v1/auth',
             chat: '/api/v1/chat'
         },
         timestamp: new Date().toISOString()
@@ -72,7 +70,6 @@ app.get('/', (req, res) => {
 });
 
 // Routes
-app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/chat', chatRoutes);
 
 // 404 handler
@@ -83,8 +80,7 @@ app.use('*', (req, res) => {
         availableEndpoints: {
             health: 'GET /health',
             root: 'GET /',
-            auth: 'POST /api/v1/auth/register, POST /api/v1/auth/login',
-            chat: 'GET /api/v1/chat/sessions, POST /api/v1/chat/sessions'
+            chat: 'GET /api/v1/chat/sessions, POST /api/v1/chat/sessions, POST /api/v1/chat/messages'
         }
     });
 });
@@ -110,7 +106,6 @@ function startServer() {
             console.log(` Environment: ${process.env.NODE_ENV || 'development'}`);
             console.log(` Health check: http://${HOST}:${PORT}/health`);
             console.log(` Root endpoint: http://${HOST}:${PORT}/`);
-            console.log(` Auth API: http://${HOST}:${PORT}/api/v1/auth`);
             console.log(` Chat API: http://${HOST}:${PORT}/api/v1/chat`);
             console.log(` WebSocket: ws://${HOST}:${PORT}`);
             console.log(' ===============================================\n');

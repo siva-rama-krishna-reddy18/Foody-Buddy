@@ -1,163 +1,128 @@
-const jwt = require('jsonwebtoken');
 const chatService = require('./chatservice');
-const { PrismaClient } = require('@prisma/client');
+const { v4: uuidv4 } = require('uuid');
 
-const prisma = new PrismaClient();
+console.log('SocketService: Loading...');
 
 module.exports = (io) => {
-    // Socket authentication middleware
-    io.use(async (socket, next) => {
-        try {
-            const token = socket.handshake.auth.token;
-            
-            if (!token) {
-                return next(new Error('Authentication error: No token provided'));
-            }
-            
-            const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            const user = await prisma.user.findUnique({
-                where: { id: decoded.userId },
-                select: { id: true, email: true, name: true }
-            });
-            
-            if (!user) {
-                return next(new Error('Authentication error: User not found'));
-            }
-            
-            socket.userId = user.id;
-            socket.user = user;
-            next();
-        } catch (error) {
-            console.error('Socket authentication error:', error);
-            next(new Error('Authentication error'));
-        }
-    });
+    console.log('SocketService: Initializing...');
     
     io.on('connection', (socket) => {
-        console.log(` User connected: ${socket.user.name} (${socket.id})`);
-        
-        // Join user to their personal room for notifications
-        socket.join(`user_${socket.userId}`);
-        
-        // Handle joining a chat session
-        socket.on('join-session', async (data) => {
-            try {
-                const { sessionId } = data;
-                
-                // Verify session ownership
-                const session = await chatService.getSessionById(sessionId);
-                if (!session || session.userId !== socket.userId) {
-                    socket.emit('error', { message: 'Session not found or access denied' });
-                    return;
-                }
-                
-                socket.join(`session_${sessionId}`);
-                socket.currentSession = sessionId;
-                
-                console.log(` User ${socket.user.name} joined session: ${sessionId}`);
-                
-                // Send session info and recent messages
-                const messages = await chatService.getChatHistory(sessionId, 20);
-                socket.emit('session-joined', {
-                    session,
-                    messages
-                });
-            } catch (error) {
-                console.error('Join session error:', error);
-                socket.emit('error', { message: 'Failed to join session' });
-            }
+        console.log(`SocketService: Client connected: ${socket.id}`);
+
+        // Send welcome message
+        socket.emit('message', {
+            id: uuidv4(),
+            message: 'Connected to FoodyBuddy! Send me a message.',
+            sender: 'ai',
+            timestamp: new Date()
         });
-        
-        // Handle sending messages
-        socket.on('send-message', async (data) => {
-            try {
-                const { sessionId, content, messageType = 'text' } = data;
-                
-                if (!sessionId || !content) {
-                    socket.emit('error', { message: 'Session ID and content are required' });
-                    return;
-                }
-                
-                // Verify session ownership
-                const session = await chatService.getSessionById(sessionId);
-                if (!session || session.userId !== socket.userId) {
-                    socket.emit('error', { message: 'Session not found or access denied' });
-                    return;
-                }
-                
-                // Save user message
-                const userMessage = await chatService.saveMessage(sessionId, content, 'user', messageType);
-                
-                // Broadcast user message to session
-                io.to(`session_${sessionId}`).emit('new-message', {
-                    message: userMessage,
-                    type: 'user'
-                });
-                
-                // Simulate AI processing (replace with actual AI in Week 2)
-                setTimeout(async () => {
-                    try {
-                        const aiResponse = `Echo: ${content}`;
-                        const aiMessage = await chatService.saveMessage(sessionId, aiResponse, 'ai', 'text');
-                        
-                        io.to(`session_${sessionId}`).emit('new-message', {
-                            message: aiMessage,
-                            type: 'ai'
-                        });
-                    } catch (error) {
-                        console.error('AI response error:', error);
-                        socket.emit('error', { message: 'Failed to generate AI response' });
-                    }
-                }, 1000);
-                
-            } catch (error) {
-                console.error('Send message error:', error);
-                socket.emit('error', { message: 'Failed to send message' });
-            }
-        });
-        
-        // Handle typing indicators
-        socket.on('typing-start', (data) => {
-            const { sessionId } = data;
-            socket.to(`session_${sessionId}`).emit('user-typing', {
-                userId: socket.userId,
-                userName: socket.user.name,
-                isTyping: true
-            });
-        });
-        
-        socket.on('typing-stop', (data) => {
-            const { sessionId } = data;
-            socket.to(`session_${sessionId}`).emit('user-typing', {
-                userId: socket.userId,
-                userName: socket.user.name,
-                isTyping: false
-            });
-        });
-        
-        // Handle leaving session
-        socket.on('leave-session', (data) => {
-            const { sessionId } = data;
-            socket.leave(`session_${sessionId}`);
-            socket.currentSession = null;
-            console.log(` User ${socket.user.name} left session: ${sessionId}`);
-        });
-        
-        // Handle disconnect
-        socket.on('disconnect', () => {
-            console.log(` User disconnected: ${socket.user.name} (${socket.id})`);
+
+        // Handle customer authentication
+        socket.on('authenticate', async (data) => {
+            console.log('SocketService: Authentication received:', data);
             
-            // Notify session about user leaving if they were typing
-            if (socket.currentSession) {
-                socket.to(`session_${socket.currentSession}`).emit('user-typing', {
-                    userId: socket.userId,
-                    userName: socket.user.name,
-                    isTyping: false
+            try {
+                const { phoneNumber } = data;
+                
+                if (!phoneNumber) {
+                    console.log('SocketService: No phone number provided');
+                    socket.emit('error', { message: 'Phone number is required' });
+                    return;
+                }
+
+                console.log(`SocketService: Authenticating customer ${phoneNumber}`);
+                
+                // Store customer info
+                socket.customerId = phoneNumber;
+                
+                // CREATE SESSION IN DATABASE (this was missing!)
+                const session = await chatService.createSession(phoneNumber, `Chat ${new Date().toLocaleDateString()}`);
+                const sessionId = session.id;
+                
+                socket.sessionId = sessionId;
+                socket.join(sessionId);
+
+                console.log(`SocketService: Database session created ${sessionId} for ${phoneNumber}`);
+
+                // Send success
+                socket.emit('authenticated', { 
+                    success: true, 
+                    sessionId: sessionId,
+                    message: 'Connected successfully! How can I help you today?' 
+                });
+
+            } catch (error) {
+                console.error('SocketService: Authentication error:', error);
+                socket.emit('error', { message: 'Authentication failed' });
+            }
+        });
+
+        // Handle incoming messages
+        socket.on('message', async (data) => {
+            console.log('SocketService: MESSAGE RECEIVED!', data);
+            
+            try {
+                const { message } = data;
+                
+                if (!message || !message.trim()) {
+                    console.log('SocketService: Empty message received');
+                    return;
+                }
+
+                console.log(`SocketService: Processing message: "${message}"`);
+
+                // Get or create session in database
+                let sessionId = socket.sessionId;
+                if (!sessionId) {
+                    console.log('SocketService: No session found, creating emergency session...');
+                    const customerId = socket.customerId || '+1234567890';
+                    const session = await chatService.createSession(customerId, 'Emergency Chat');
+                    sessionId = session.id;
+                    socket.sessionId = sessionId;
+                    console.log(`SocketService: Emergency database session created: ${sessionId}`);
+                }
+
+                // Don't echo customer message - frontend handles this
+                console.log('SocketService: Processing customer message (no echo needed)');
+
+                // Get AI response directly
+                console.log('SocketService: Calling chatService.getAIResponse...');
+                const aiResponse = await chatService.getAIResponse(message.trim(), sessionId);
+                console.log('SocketService: AI Response received:', aiResponse);
+
+                if (aiResponse && aiResponse.trim()) {
+                    const aiMessage = {
+                        id: uuidv4(),
+                        message: aiResponse.trim(),
+                        sender: 'ai',
+                        timestamp: new Date(),
+                        sessionId: sessionId
+                    };
+
+                    socket.emit('message', aiMessage);
+                    console.log('SocketService: Real AI response sent');
+                }
+
+            } catch (error) {
+                console.error('SocketService: Error processing message:', error);
+                
+                socket.emit('message', {
+                    id: uuidv4(),
+                    message: "Error occurred! Check console.",
+                    sender: 'ai',
+                    timestamp: new Date()
                 });
             }
+        });
+
+        socket.on('disconnect', () => {
+            console.log(`SocketService: Client disconnected: ${socket.id}`);
+        });
+
+        socket.on('error', (error) => {
+            console.error('SocketService: Socket error:', error);
         });
     });
-    
-    console.log('🔌 Socket.IO server initialized');
-};
 
+    console.log('SocketService: Initialized successfully');
+};

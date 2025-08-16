@@ -1,0 +1,263 @@
+{
+    "info": {
+        "name": "FoodyBuddy Chat Backend API",
+        "description": "Complete API collection for FoodyBuddy chat backend without authentication",
+        "version": "1.0.0"
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://127.0.0.1:3001",
+            "type": "string"
+        },
+        {
+            "key": "api_base",
+            "value": "http://127.0.0.1:3001/api/v1",
+            "type": "string"
+        },
+        {
+            "key": "customer_id",
+            "value": "+1234567890",
+            "type": "string"
+        },
+        {
+            "key": "session_id",
+            "value": "",
+            "type": "string"
+        }
+    ],
+    "item": [
+        {
+            "name": "Health Check",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/health",
+                    "host": ["{{base_url}}"],
+                    "path": ["health"]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status code is 200', function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test('Response has correct structure', function () {",
+                            "    const jsonData = pm.response.json();",
+                            "    pm.expect(jsonData.status).to.eql('OK');",
+                            "    pm.expect(jsonData.message).to.include('FoodyBuddy');",
+                            "});"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Create Chat Session",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"customerId\": \"{{customer_id}}\",\n  \"title\": \"Test Chat Session\"\n}"
+                },
+                "url": {
+                    "raw": "{{api_base}}/chat/sessions",
+                    "host": ["{{api_base}}"],
+                    "path": ["chat", "sessions"]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status code is 201', function () {",
+                            "    pm.response.to.have.status(201);",
+                            "});",
+                            "",
+                            "pm.test('Response has session data', function () {",
+                            "    const jsonData = pm.response.json();",
+                            "    pm.expect(jsonData.success).to.be.true;",
+                            "    pm.expect(jsonData.data.session).to.exist;",
+                            "    pm.expect(jsonData.data.session.id).to.exist;",
+                            "    ",
+                            "    // Save session ID for future requests",
+                            "    pm.collectionVariables.set('session_id', jsonData.data.session.id);",
+                            "});"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Get Chat Sessions",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{api_base}}/chat/sessions?customerId={{customer_id}}&limit=20",
+                    "host": ["{{api_base}}"],
+                    "path": ["chat", "sessions"],
+                    "query": [
+                        {
+                            "key": "customerId",
+                            "value": "{{customer_id}}"
+                        },
+                        {
+                            "key": "limit",
+                            "value": "20"
+                        }
+                    ]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status code is 200', function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test('Response has sessions array', function () {",
+                            "    const jsonData = pm.response.json();",
+                            "    pm.expect(jsonData.success).to.be.true;",
+                            "    pm.expect(jsonData.data.sessions).to.be.an('array');",
+                            "});"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Send Message",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"sessionId\": \"{{session_id}}\",\n  \"customerId\": \"{{customer_id}}\",\n  \"content\": \"Hello! Can you recommend some pizza?\",\n  \"messageType\": \"text\"\n}"
+                },
+                "url": {
+                    "raw": "{{api_base}}/chat/messages",
+                    "host": ["{{api_base}}"],
+                    "path": ["chat", "messages"]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status code is 200', function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test('Response has both user and AI messages', function () {",
+                            "    const jsonData = pm.response.json();",
+                            "    pm.expect(jsonData.success).to.be.true;",
+                            "    pm.expect(jsonData.data.userMessage).to.exist;",
+                            "    pm.expect(jsonData.data.aiMessage).to.exist;",
+                            "    pm.expect(jsonData.data.userMessage.sender).to.eql('customer');",
+                            "    pm.expect(jsonData.data.aiMessage.sender).to.eql('ai');",
+                            "});"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Get Chat History",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{api_base}}/chat/messages/{{session_id}}?customerId={{customer_id}}&limit=50",
+                    "host": ["{{api_base}}"],
+                    "path": ["chat", "messages", "{{session_id}}"],
+                    "query": [
+                        {
+                            "key": "customerId",
+                            "value": "{{customer_id}}"
+                        },
+                        {
+                            "key": "limit",
+                            "value": "50"
+                        }
+                    ]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status code is 200', function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test('Response has messages and session', function () {",
+                            "    const jsonData = pm.response.json();",
+                            "    pm.expect(jsonData.success).to.be.true;",
+                            "    pm.expect(jsonData.data.messages).to.be.an('array');",
+                            "    pm.expect(jsonData.data.session).to.exist;",
+                            "});"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Delete Session",
+            "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                    "raw": "{{api_base}}/chat/sessions/{{session_id}}?customerId={{customer_id}}",
+                    "host": ["{{api_base}}"],
+                    "path": ["chat", "sessions", "{{session_id}}"],
+                    "query": [
+                        {
+                            "key": "customerId",
+                            "value": "{{customer_id}}"
+                        }
+                    ]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Status code is 200', function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test('Session deleted successfully', function () {",
+                            "    const jsonData = pm.response.json();",
+                            "    pm.expect(jsonData.success).to.be.true;",
+                            "    pm.expect(jsonData.message).to.include('deleted');",
+                            "});"
+                        ]
+                    }
+                }
+            ]
+        }
+    ]
+}
