@@ -1,4 +1,5 @@
  **FoodyBuddy Backend - Chat-Only Implementation**
+ 
 **Major Changes:**
 - Removed user registration, login, and profile endpoints
 - Updated chat system to use customer ID instead of JWT
@@ -27,4 +28,5 @@
 - Frontend integration successful"
 
 **Quick Start**
-npm run dev
+
+- npm run dev
