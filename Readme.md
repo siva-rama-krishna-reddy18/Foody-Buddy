@@ -8,13 +8,13 @@
 - Updated API endpoints to accept customer ID in request body
 - Enhanced AI responses with FoodyBuddy context
 
-** Technical Changes:**
+**Technical Changes:**
 - Removed: authController, authService, auth routes
 - Modified: chatController to use customer ID from request
 - Updated: socketService with auto session creation
 - Simplified: WebSocket authentication to use customer ID
 
-** Features:**
+**Features:**
 - Real-time chat with AI responses
 - Customer ID-based access control
 - Enhanced AI responses mentioning 82 food products
