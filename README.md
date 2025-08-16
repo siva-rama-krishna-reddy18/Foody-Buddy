@@ -20,6 +20,7 @@ CHAT PAGE: http://localhost:5173/chat
 ## Changelog
 
 08/15/2025 11:45PM CST - Removed Login, Register, User Authentication functionalities.
+
 08/15/2025 11:00AM CST - Completed: Project Foundation Setup; Core Chat System; User Authentication
 
 Pending:
