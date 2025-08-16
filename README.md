@@ -23,5 +23,3 @@ NOTE: Remember to fix the hardcoded URL value and the rule-based responses in th
 Pending:
 
 Test Cases: Jest test suite is incompatible with React 19, and is breaking the dev instance.
-
-Backend-Frontend Integration: Pending due to WebSocket issues when connecting the backend server and API URLs.
