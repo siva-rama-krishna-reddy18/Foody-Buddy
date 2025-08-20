@@ -116,10 +116,11 @@ class ChatController {
             
             const message = await chatService.saveMessage(sessionId, content, 'customer', messageType);
             
-            // Enhanced AI response for FoodyBuddy
+            // Get AI response
+            const aiResponseText = await chatService.getAIResponse(content, sessionId);
             const aiResponse = await chatService.saveMessage(
                 sessionId,
-                `Hello! I received your message: "${content}". I'm your FoodyBuddy AI assistant, and I have access to information about 82 delicious food products and can help you with food recommendations based on your preferences. How can I help you today?`,
+                aiResponseText,
                 'ai',
                 'text'
             );
@@ -157,6 +158,70 @@ class ChatController {
             });
         } catch (error) {
             console.error('Delete session error:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
+
+    // NEW WEEK 2 METHODS
+    async updateSessionTitle(req, res) {
+        try {
+            const { sessionId } = req.params;
+            const { title, customerId } = req.body;
+            
+            if (!title || !customerId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Title and customer ID are required'
+                });
+            }
+            
+            const session = await chatService.getSessionById(sessionId);
+            if (!session || session.customer_id !== customerId) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Session not found or access denied'
+                });
+            }
+            
+            const updatedSession = await chatService.updateSessionTitle(sessionId, title);
+            
+            res.status(200).json({
+                success: true,
+                data: { session: updatedSession },
+                message: 'Session title updated successfully'
+            });
+        } catch (error) {
+            console.error('Update session title error:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
+
+    async getSessionWithMessages(req, res) {
+        try {
+            const { sessionId } = req.params;
+            const { customerId } = req.query;
+            
+            if (!customerId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Customer ID is required'
+                });
+            }
+            
+            const sessionData = await chatService.getSessionWithMessages(sessionId, customerId);
+            
+            res.status(200).json({
+                success: true,
+                data: sessionData
+            });
+        } catch (error) {
+            console.error('Get session with messages error:', error);
             res.status(500).json({
                 success: false,
                 error: error.message

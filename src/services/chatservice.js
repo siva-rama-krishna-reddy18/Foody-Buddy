@@ -54,7 +54,7 @@ class ChatService {
                     content,
                     sender,
                     message_type: messageType,
-                    metadata,
+                    metadata: metadata || null,
                     created_at: now
                 }
             });
@@ -62,7 +62,9 @@ class ChatService {
             // Update session updated_at
             await prisma.chat_sessions.update({
                 where: { id: sessionId },
-                data: { updated_at: new Date() }
+                data: { 
+                    updated_at: new Date()
+                }
             });
             
             return message;
@@ -126,70 +128,102 @@ class ChatService {
         }
     }
 
-    // *** NEW METHOD - This is what was missing! ***
+    // NEW WEEK 2 METHODS
+    async updateSessionTitle(sessionId, title) {
+        try {
+            return await prisma.chat_sessions.update({
+                where: { id: sessionId },
+                data: { 
+                    title, 
+                    updated_at: new Date() 
+                }
+            });
+        } catch (error) {
+            console.error('Error updating session title:', error);
+            throw error;
+        }
+    }
+
+    async getSessionWithMessages(sessionId, customerId) {
+        try {
+            const session = await prisma.chat_sessions.findFirst({
+                where: { 
+                    id: sessionId,
+                    customer_id: customerId 
+                },
+                include: {
+                    messages: {
+                        orderBy: { created_at: 'asc' }
+                    }
+                }
+            });
+            
+            if (!session) {
+                throw new Error('Session not found or access denied');
+            }
+            
+            return session;
+        } catch (error) {
+            console.error('Error getting session with messages:', error);
+            throw error;
+        }
+    }
+
     async getAIResponse(message, sessionId) {
         try {
             console.log(`Getting AI response for message: "${message}" in session: ${sessionId}`);
-            
-            // First, save the customer's message to database
-            await this.saveMessage(sessionId, message, 'customer');
-            
-            // Get recent conversation history for context (last 10 messages)
-            const recentHistory = await this.getChatHistory(sessionId, 10);
             
             // Generate AI response based on the message
             let aiResponse;
             const lowerMessage = message.toLowerCase();
             
-            // Simple rule-based responses for FoodyBuddy
+            // Enhanced rule-based responses for FoodyBuddy
             if (lowerMessage.includes('hello') || lowerMessage.includes('hi') || lowerMessage.includes('hey')) {
-                aiResponse = "Hello! Welcome to FoodyBuddy! 🍕 I'm your food assistant. How can I help you today? I can help with menu recommendations, order placement, and answer any food-related questions!";
+                aiResponse = "Hello! Welcome to FoodyBuddy! I'm your food assistant. How can I help you today? I can help with menu recommendations, order placement, and answer any food-related questions!";
             } 
+            else if (lowerMessage.includes('recommend') || lowerMessage.includes('suggest') || lowerMessage.includes('popular')) {
+                aiResponse = "Today's Recommendations!\n\nMOST POPULAR:\n• Margherita Pizza - $12.99 (Fresh basil, mozzarella, San Marzano tomatoes)\n• Classic Beef Burger - $8.99 (Our signature burger with crispy fries)\n• Spaghetti Carbonara - $12.99 (Authentic Italian recipe)\n\nBEST VALUE:\n• Lunch Combo - $9.99 (Any pasta + drink + garlic bread)\n• Pizza Deal - $16.99 (Large pizza + 2 drinks)\n\nHEALTHY OPTIONS:\n• Caesar Salad with Grilled Chicken - $9.99\n• Veggie Burger - $8.49\n\nWhat sounds good to you? I can tell you more about any of these!";
+            }
+            else if (lowerMessage.includes('deal') || lowerMessage.includes('offer') || lowerMessage.includes('special')) {
+                aiResponse = "Current Deals & Specials!\n\nLIMITED TIME OFFERS:\n• Family Feast - $24.99 (2 Large pizzas + 4 drinks + garlic bread) - SAVE $8!\n• Lunch Special - $7.99 (11AM-3PM) - Any burger + fries + drink\n• Student Discount - 15% off with valid ID\n\nDAILY SPECIALS:\n• Monday: Pizza Monday - Buy 1 Get 1 Half Off\n• Wednesday: Wings Wednesday - $0.50 per wing\n• Friday: Fish Friday - Fresh fish dishes starting $11.99\n\nDELIVERY:\n• Free delivery on orders over $25\n• $2.99 delivery fee for smaller orders\n\nWhich deal interests you most?";
+            }
             else if (lowerMessage.includes('menu') || lowerMessage.includes('food') || lowerMessage.includes('eat')) {
-                aiResponse = "Here are our popular menu categories:\n\n🍕 **Pizza** - Starting from $12.99\n🍔 **Burgers** - Starting from $8.99\n🍜 **Pasta** - Starting from $10.99\n🥗 **Salads** - Starting from $7.99\n🍗 **Chicken** - Starting from $9.99\n🌮 **Mexican** - Starting from $6.99\n\nWhat type of food are you in the mood for?";
+                aiResponse = "Here are our popular menu categories!\n\nPIZZA ($12.99 - $18.99)\n- Margherita, Pepperoni, BBQ Chicken, Veggie Supreme\n\nBURGERS ($8.99 - $12.99)\n- Classic Beef, Chicken Deluxe, Veggie Burger, BBQ Bacon\n\nPASTA ($10.99 - $14.99)\n- Spaghetti Carbonara, Penne Arrabbiata, Fettuccine Alfredo\n\nSALADS ($7.99 - $9.99)\n- Caesar, Greek, Garden Fresh, Chicken Caesar\n\nWhat type of food sounds good to you?";
             } 
             else if (lowerMessage.includes('pizza')) {
-                aiResponse = "Great choice! 🍕 Our pizza menu includes:\n\n• **Margherita** - $12.99\n• **Pepperoni** - $14.99\n• **BBQ Chicken** - $16.99\n• **Vegetarian** - $13.99\n• **Meat Lovers** - $18.99\n\nWhich pizza would you like to order? I can also customize toppings for you!";
+                aiResponse = "Great choice! Our pizzas are made fresh daily:\n\n• Margherita - $12.99 (Fresh basil, mozzarella, tomato)\n• Pepperoni - $14.99 (Classic pepperoni with cheese)\n• BBQ Chicken - $16.99 (BBQ sauce, chicken, red onions)\n• Veggie Supreme - $15.99 (Bell peppers, mushrooms, olives)\n• Meat Lovers - $18.99 (Pepperoni, sausage, bacon, ham)\n\nWhich pizza would you like to order? I can also help with custom toppings!";
             } 
             else if (lowerMessage.includes('burger')) {
-                aiResponse = "Perfect! 🍔 Our burger selection:\n\n• **Classic Beef** - $8.99\n• **Cheeseburger** - $9.99\n• **Chicken Burger** - $9.49\n• **Veggie Burger** - $8.49\n• **BBQ Bacon** - $11.99\n\nAll burgers come with fries. Which one sounds good to you?";
+                aiResponse = "Awesome! Our burgers are juicy and delicious:\n\n• Classic Beef - $8.99 (Lettuce, tomato, onion, pickle)\n• Chicken Deluxe - $9.99 (Grilled chicken, avocado, bacon)\n• Veggie Burger - $8.49 (Plant-based patty, fresh veggies)\n• BBQ Bacon - $11.99 (BBQ sauce, crispy bacon, onion rings)\n• Double Cheese - $12.99 (Two patties, double cheese)\n\nAll burgers come with crispy fries! Which one catches your eye?";
+            } 
+            else if (lowerMessage.includes('pasta')) {
+                aiResponse = "Perfect! Our pasta dishes are made with authentic Italian recipes:\n\n• Spaghetti Carbonara - $12.99 (Eggs, bacon, parmesan)\n• Penne Arrabbiata - $10.99 (Spicy tomato sauce, herbs)\n• Fettuccine Alfredo - $11.99 (Creamy white sauce, parmesan)\n• Lasagna - $14.99 (Layered with meat sauce and cheese)\n• Pasta Primavera - $11.49 (Fresh vegetables, light sauce)\n\nWhich pasta dish would you like to try?";
             } 
             else if (lowerMessage.includes('order') || lowerMessage.includes('buy') || lowerMessage.includes('purchase')) {
-                aiResponse = "Excellent! I'd love to help you place an order. 🛒\n\nTo get started:\n1. Tell me what items you'd like\n2. I'll confirm the details and prices\n3. We'll proceed to checkout\n\nWhat would you like to add to your cart?";
+                aiResponse = "Excellent! I'd love to help you place an order.\n\nTo get started:\n1. Tell me what items you'd like\n2. I'll confirm the details and prices\n3. We'll proceed to checkout\n\nWhat would you like to add to your cart?";
             } 
             else if (lowerMessage.includes('price') || lowerMessage.includes('cost') || lowerMessage.includes('how much')) {
-                aiResponse = "Our prices are very competitive! 💰\n\n**Quick Price Guide:**\n• Appetizers: $4.99 - $8.99\n• Main dishes: $8.99 - $18.99\n• Desserts: $3.99 - $6.99\n• Drinks: $1.99 - $4.99\n\nWhat specific item would you like the price for?";
-            } 
+                aiResponse = "Here are our price ranges!\n\nPizza: $12.99 - $18.99\nBurgers: $8.99 - $12.99\nPasta: $10.99 - $14.99\nSalads: $7.99 - $9.99\nDrinks: $1.99 - $3.99\nDesserts: $4.99 - $7.99\n\nFree delivery on orders over $25! What specific item would you like to know about?";
+            }
             else if (lowerMessage.includes('delivery') || lowerMessage.includes('pickup')) {
-                aiResponse = "We offer both delivery and pickup! 🚗\n\n**Delivery:**\n• Free delivery on orders over $25\n• $2.99 delivery fee for smaller orders\n• Average delivery time: 25-35 minutes\n\n**Pickup:**\n• Always free\n• Ready in 15-20 minutes\n• Call when you arrive for curbside pickup\n\nWhich option works better for you?";
+                aiResponse = "We offer both delivery and pickup!\n\nDELIVERY:\n- Free delivery on orders $25+\n- $2.99 delivery fee for smaller orders\n- Average time: 25-35 minutes\n- We deliver within 5 miles\n\nPICKUP:\n- Always free\n- Ready in 15-20 minutes\n- Call when you arrive for curbside service\n\nWhich option works better for you?";
             } 
             else if (lowerMessage.includes('thank') || lowerMessage.includes('thanks')) {
-                aiResponse = "You're very welcome! 😊 I'm here to help whenever you need assistance with your food orders. Is there anything else I can help you with today?";
+                aiResponse = "You're very welcome! I'm here whenever you need help with your FoodyBuddy order. Anything else I can assist you with?";
+            } 
+            else if (lowerMessage.includes('help')) {
+                aiResponse = "I'm here to help! I can assist you with:\n\n- Menu Information - Browse our full menu\n- Order Placement - Help you order your favorites\n- Pricing - Get costs for any items\n- Delivery Info - Delivery times and areas\n- Recommendations - Suggest popular items\n- Questions - Answer anything about our food\n\nWhat would you like help with?";
             } 
             else {
-                // Generic helpful response
-                aiResponse = `Thanks for your message! I'm FoodyBuddy's AI assistant, and I'm here to help you with:\n\n🍽️ **Menu recommendations**\n📝 **Placing orders**\n💰 **Pricing information**\n🚗 **Delivery & pickup options**\n❓ **Any food-related questions**\n\nYou said: "${message}"\n\nWhat would you like to know more about?`;
+                aiResponse = `Thanks for your message! I'm your FoodyBuddy assistant and I'd love to help you with our delicious food options!\n\nI can help you with menu information, place orders, check prices, or answer any questions about our food.\n\nYou said: "${message}"\n\nWhat would you like to know more about? Just say "menu" to see our full selection!`;
             }
             
-            // Save the AI response to database
-            await this.saveMessage(sessionId, aiResponse, 'ai');
-            
-            console.log(`AI Response generated and saved: ${aiResponse.substring(0, 100)}...`);
+            console.log(`AI Response generated: ${aiResponse.substring(0, 100)}...`);
             return aiResponse;
             
         } catch (error) {
             console.error('Error in getAIResponse:', error);
-            
-            // Save error message to database
-            const errorResponse = "Sorry, I'm having trouble processing your request right now. Please try again in a moment. 🤖";
-            
-            try {
-                await this.saveMessage(sessionId, errorResponse, 'ai');
-            } catch (saveError) {
-                console.error('Error saving error message:', saveError);
-            }
-            
-            return errorResponse;
+            return "Sorry, I'm having trouble processing your request right now. Please try again in a moment.";
         }
     }
 }

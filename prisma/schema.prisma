@@ -91,7 +91,7 @@ model chat_sessions {
   customer_id String
   title       String?
   created_at  DateTime   @default(now())
-  updated_at  DateTime
+  updated_at  DateTime   @updatedAt
   customers   Customer   @relation(fields: [customer_id], references: [phone], onDelete: Cascade)
   messages    messages[]
 
@@ -112,5 +112,3 @@ model messages {
   @@index([session_id, created_at])
   @@map("messages")
 }
-
-
