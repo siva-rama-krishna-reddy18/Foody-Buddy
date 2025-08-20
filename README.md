@@ -13,7 +13,9 @@ CHAT PAGE: http://localhost:5173/chat
 
 ## Changelog
 
-08/16/2025 3:00PM CST - Added a .env.local README text file for instructions on local environment variables setup. Updated useChatStore.ts and socketClient.ts for integration with the backend.
+08/20/2025 4:05PM CST - Week 2 Update compatible with the updated Week 2 Backend, per the team's update requirements.
+
+08/16/2025 3:00PM CST - Updated useChatStore.ts and socketClient.ts for integration with the backend.
 NOTE: Remember to fix the hardcoded URL value and the rule-based responses in these files in future code optimization phases.
 
 08/15/2025 11:45PM CST - Removed Login, Register, User Authentication functionalities.
