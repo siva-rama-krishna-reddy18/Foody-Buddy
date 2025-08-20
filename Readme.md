@@ -30,3 +30,11 @@
 **Quick Start**
 
 - npm run dev
+**Week 2 enhanced backend features**
+- Added session title update functionality with ownership verification
+- Added session details endpoint with full message retrieval
+- Enhanced AI responses with detailed food menu categories
+- Updated database schema with complete table definitions
+- Added realistic seed data with conversation threads
+- Implemented proper error handling and validation
+- Maintained backward compatibility with Week 1 features
