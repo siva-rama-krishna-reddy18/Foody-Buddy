@@ -1,49 +1,65 @@
 // src/components/chat/SessionHeader.tsx
 import { useState } from 'react'
-import { api } from '@/services/api/ApiClient'
+import { useChatStore } from '../../stores/useChatStore'
 
-interface SessionHeaderProps {
-  sessionId: string
-  customerId: string
-  initialTitle?: string
-}
+export default function SessionHeader() {
+  const { currentSession } = useChatStore()
+  const [isEditing, setIsEditing] = useState(false)
+  const [title, setTitle] = useState(currentSession?.title || 'Chat Session')
 
-export default function SessionHeader({
-  sessionId,
-  customerId,
-  initialTitle = 'Chat Session',
-}: SessionHeaderProps) {
-  const [title, setTitle] = useState(initialTitle)
-  const [editing, setEditing] = useState(false)
+  const handleSave = () => {
+    // You can implement rename functionality here later
+    setIsEditing(false)
+  }
 
-  const handleSave = async () => {
-    try {
-      const updated = await api.chat.renameSession(sessionId, title, customerId)
-      setTitle(updated.title)
-    } catch (e: any) {
-      console.error('Failed to rename session:', e)
-    } finally {
-      setEditing(false)
-    }
+  const handleCancel = () => {
+    setTitle(currentSession?.title || 'Chat Session')
+    setIsEditing(false)
   }
 
   return (
-    <div className="flex items-center justify-between p-2 border-b bg-gray-50">
-      {editing ? (
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={handleSave}
-          className="border rounded px-2 py-1 text-sm"
-          autoFocus
-        />
-      ) : (
-        <h2
-          className="font-semibold text-gray-800 cursor-pointer"
-          onClick={() => setEditing(true)}
-        >
-          {title}
-        </h2>
+    <div className="border-b p-4 bg-gray-50">
+      <div className="flex items-center justify-between">
+        {isEditing ? (
+          <div className="flex items-center space-x-2 flex-1">
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="flex-1 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              autoFocus
+            />
+            <button
+              onClick={handleSave}
+              className="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
+            >
+              Save
+            </button>
+            <button
+              onClick={handleCancel}
+              className="px-3 py-1 bg-gray-500 text-white rounded text-sm hover:bg-gray-600"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <>
+            <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
+            <button
+              onClick={() => setIsEditing(true)}
+              className="px-3 py-1 text-sm text-blue-600 hover:text-blue-800"
+            >
+              Rename
+            </button>
+          </>
+        )}
+      </div>
+      
+      {/* Optional: Show session info */}
+      {currentSession && (
+        <div className="mt-2 text-xs text-gray-500">
+          Session ID: {currentSession.id}
+        </div>
       )}
     </div>
   )

@@ -1,14 +1,41 @@
-import { useChatStore } from '../../stores/useChatStore';
-import MessageBubble from './MessageBubble';
+// src/components/chat/MessageList.tsx
+import { useEffect, useRef } from 'react'
+import { useChatStore } from '../../stores/useChatStore'
 
 export default function MessageList() {
-  const messages = useChatStore((state) => state.messages);
-
+  const { messages } = useChatStore()
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+  
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-2">
-      {messages.map((msg, idx) => (
-        <MessageBubble key={idx} text={msg.text} sender={msg.sender} />
-      ))}
+    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+      {messages.length === 0 ? (
+        <div className="text-center text-gray-500 mt-8">
+          <p>No messages yet...</p>
+          <p className="text-xs mt-2">Start typing to see messages appear here</p>
+        </div>
+      ) : (
+        messages.map((msg, index) => (
+          <div key={index} className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+              msg.sender === 'me' 
+                ? 'bg-blue-500 text-white' 
+                : 'bg-white text-gray-800 border shadow-sm'
+            }`}>
+              <div className="text-xs opacity-75 mb-1">
+                {msg.sender === 'me' ? 'You' : 'Bot'}
+              </div>
+              <div className="whitespace-pre-wrap">{msg.text}</div>
+            </div>
+          </div>
+        ))
+      )}
+      {/* Invisible element to scroll to */}
+      <div ref={messagesEndRef} />
     </div>
-  );
+  )
 }
