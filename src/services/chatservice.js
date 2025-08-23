@@ -122,6 +122,7 @@ class ChatService {
             });
             
             return true;
+        
         } catch (error) {
             console.error('Error deleting session:', error);
             throw error;

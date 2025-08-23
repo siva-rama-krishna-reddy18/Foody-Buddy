@@ -1,40 +1,38 @@
 const errorHandler = (err, req, res, next) => {
     console.error(err.stack);
-    
-    // Default error
-    let error = {
-        message: err.message || 'Internal Server Error',
-        status: err.statusCode || 500
-    };
-    
-    // Prisma errors
+
+    let status = err.statusCode || 500;
+    let message = err.message || 'Internal Server Error';
+
+    // Prisma unique constraint
     if (err.code === 'P2002') {
-        error.message = 'Resource already exists';
-        error.status = 409;
+        status = 409;
+        message = 'Resource already exists';
     }
-    
-    // Validation errors
+
+    // Validation error
     if (err.name === 'ValidationError') {
-        error.message = 'Validation Error';
-        error.status = 400;
+        status = 400;
+        message = 'Validation Error';
     }
-    
+
     // JWT errors
     if (err.name === 'JsonWebTokenError') {
-        error.message = 'Invalid token';
-        error.status = 401;
+        status = 401;
+        message = 'Invalid token';
     }
-    
+
     if (err.name === 'TokenExpiredError') {
-        error.message = 'Token expired';
-        error.status = 401;
+        status = 401;
+        message = 'Token expired';
     }
-    
-    res.status(error.status).json({
+
+    res.status(status).json({
         success: false,
-        error: error.message
+        error: message
     });
 };
 
 module.exports = { errorHandler };
+
 
