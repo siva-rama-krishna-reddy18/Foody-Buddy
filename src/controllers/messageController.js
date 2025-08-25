@@ -1,4 +1,4 @@
-const chatService = require('../services/chatservice');
+const messageService = require('../services/messageService');
 
 class MessageController {
     async updateMessage(req, res, next) {
@@ -13,7 +13,12 @@ class MessageController {
         }
 
         try {
-            const updatedMessage = await chatService.updateMessage(messageId, content, customerId, metadata);
+            const updatedMessage = await messageService.updateMessage(
+                messageId,
+                content,
+                customerId,
+                metadata
+            );
 
             res.status(200).json({
                 success: true,
@@ -37,7 +42,7 @@ class MessageController {
         }
 
         try {
-            await chatService.deleteMessage(messageId, customerId);
+            await messageService.deleteMessage(messageId, customerId);
 
             res.status(200).json({
                 success: true,
@@ -60,11 +65,10 @@ class MessageController {
         }
 
         try {
-            const messages = await chatService.getChatHistory(
+            const messages = await messageService.getChatHistory(
                 sessionId,
                 limit ? parseInt(limit) : 50,
-                offset ? parseInt(offset) : 0,
-                customerId
+                offset ? parseInt(offset) : 0
             );
 
             res.status(200).json({

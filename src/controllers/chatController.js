@@ -1,4 +1,6 @@
-const chatService = require('../services/chatservice');
+const chatService = require('../services/chatservice'); // sessions
+const messageService = require('../services/messageService'); // messages
+const aiResponseService = require('../services/aiResponseService'); // AI
 
 class ChatController {
     async createSession(req, res, next) {
@@ -66,7 +68,7 @@ class ChatController {
                 });
             }
 
-            const messages = await chatService.getChatHistory(
+            const messages = await messageService.getChatHistory(
                 sessionId,
                 limit ? parseInt(limit) : 50,
                 offset ? parseInt(offset) : 0
@@ -100,10 +102,14 @@ class ChatController {
                 });
             }
 
-            const message = await chatService.saveMessage(sessionId, content, 'customer', messageType);
+            // Save user message via messageService
+            const message = await messageService.saveMessage(sessionId, content, 'customer', messageType);
 
-            const aiResponseText = await chatService.getAIResponse(content, sessionId);
-            const aiResponse = await chatService.saveMessage(sessionId, aiResponseText, 'ai', 'text');
+            // Generate AI response via aiResponseService
+            const aiResponseText = await aiResponseService.getAIResponse(content, sessionId);
+
+            // Save AI response via messageService
+            const aiResponse = await messageService.saveMessage(sessionId, aiResponseText, 'ai', 'text');
 
             res.status(200).json({
                 success: true,

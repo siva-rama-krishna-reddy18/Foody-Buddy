@@ -1,4 +1,5 @@
 const chatService = require('./chatservice');
+const aiResponseService = require('./aiResponseService');
 const { v4: uuidv4 } = require('uuid');
 
 console.log('SocketService: Loading...');
@@ -86,8 +87,8 @@ module.exports = (io) => {
                 console.log('SocketService: Processing customer message (no echo needed)');
 
                 // Get AI response directly
-                console.log('SocketService: Calling chatService.getAIResponse...');
-                const aiResponse = await chatService.getAIResponse(message.trim(), sessionId);
+                console.log('SocketService: Calling aiResponseService.getAIResponse...');
+                const aiResponse = await aiResponseService.getAIResponse(message.trim(), sessionId);
                 console.log('SocketService: AI Response received:', aiResponse);
 
                 if (aiResponse && aiResponse.trim()) {
