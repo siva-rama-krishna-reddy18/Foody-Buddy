@@ -1,24 +1,20 @@
 // src/stores/useChatStore.ts
 import { create } from 'zustand'
-import { api } from '../services/api/ApiClient'
 import { connectSocket, getSocket } from '../services/socket/socketClient'
 import type { ChatMessage } from 'src/types/chat'
 
-// Update your ChatSession type to match backend response
 interface ChatSession {
   id: string
   customer_id: string
   title: string
   created_at: string
   updated_at: string
-  messages?: BackendMessage[]
 }
 
-// Backend message format
 interface BackendMessage {
   id: string
-  content: string  // Backend uses 'content', not 'text'
-  sender: string   // 'customer' or 'ai'
+  content: string
+  sender: string
   created_at: string
   message_type: string
 }
@@ -31,7 +27,7 @@ interface ChatState {
   error: string | null
   connect: (customerId: string) => void
   disconnect: () => void
-  sendMessage: (text: string, customerId: string) => void  // Fixed: now accepts customerId
+  sendMessage: (text: string, customerId: string) => void
   addMessage: (message: ChatMessage) => void
   loadSession: (sessionId: string, customerId: string) => Promise<void>
   renameSession: (sessionId: string, title: string, customerId: string) => Promise<void>
@@ -51,23 +47,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   connect: (customerId: string) => {
     console.log('Connecting with customerId:', customerId)
-    
-    // Disconnect any existing connection first
+
     const existingSocket = getSocket()
     if (existingSocket) {
       console.log('Disconnecting existing socket')
       existingSocket.disconnect()
     }
-    
+
     const socket = connectSocket()
-    
+
     socket.on('connect', () => {
       console.log('Socket connected')
       set({ connected: true, error: null })
-      
-      // Authenticate with backend using customerId
-      console.log('Authenticating with phoneNumber:', customerId)
-      socket.emit('authenticate', { phoneNumber: customerId })
+
+      // ✅ Inject welcome message once if no messages yet
+      set((state) => {
+        if (state.messages.length === 0) {
+          console.log('Injecting welcome message with quick actions')
+          return {
+            messages: [
+              ...state.messages,
+              {
+                text: "Hello! I'm your Foody Buddy assistant. What can I do for you today?",
+                sender: 'other',
+                type: 'welcome', // mark this so MessageList shows quick actions
+              },
+            ],
+          }
+        }
+        return state
+      })
     })
 
     socket.on('disconnect', () => {
@@ -75,34 +84,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ connected: false })
     })
 
-    socket.on('authenticated', (data: any) => {
-      console.log('Authenticated:', data)
-      // Don't automatically load session - let user messages trigger responses
-    })
-
     socket.on('message', (data: any) => {
       console.log('Received message from server:', data)
-      
-      // Convert backend message format to frontend format
+
       const chatMessage: ChatMessage = {
         text: data.message || data.content || data.text,
         sender: data.sender === 'customer' ? 'me' : 'other',
       }
-      
-      console.log('Adding received message to store:', chatMessage)
+
       set((state) => ({ messages: [...state.messages, chatMessage] }))
     })
 
-    // Listen for AI responses specifically
     socket.on('ai_response', (data: any) => {
       console.log('Received AI response:', data)
-      
+
       const chatMessage: ChatMessage = {
         text: data.message || data.content || data.response,
         sender: 'other',
       }
-      
-      console.log('Adding AI response to store:', chatMessage)
+
       set((state) => ({ messages: [...state.messages, chatMessage] }))
     })
 
@@ -111,19 +111,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ error: 'Connection error' })
     })
 
-    // Store the customerId for later use
     set({ customerId })
   },
 
   disconnect: () => {
     getSocket()?.disconnect()
-    set({ connected: false, messages: [], currentSession: null })
+    // ⛔ Don’t clear messages here; only clear on hard reset if needed
+    set({ connected: false, currentSession: null })
   },
 
-  // Fixed sendMessage function
   sendMessage: (text: string, customerId: string) => {
     console.log('Store sendMessage called with:', { text, customerId })
-    
+
     const socket = getSocket()
     if (!socket || !socket.connected) {
       console.error('Socket not connected')
@@ -132,34 +131,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     if (!text.trim()) {
-      console.log('Empty message, not sending')
       return
     }
 
     try {
-      // FIRST: Add message to local state immediately for better UX
-      const userMessage: ChatMessage = { 
-        text: text.trim(), 
-        sender: 'me' 
+      const userMessage: ChatMessage = {
+        text: text.trim(),
+        sender: 'me',
       }
-      console.log('Adding user message to store:', userMessage)
-      set((state) => ({ 
+      set((state) => ({
         messages: [...state.messages, userMessage],
-        error: null
+        error: null,
       }))
 
-      // THEN: Send message to backend
       const messagePayload = {
-        message: text.trim(),    // Try 'message' field
-        content: text.trim(),    // Also try 'content' field
-        customerId: customerId,
-        phoneNumber: customerId, // Also try phoneNumber
-        sender: 'customer'
+        message: text.trim(),
+        content: text.trim(),
+        customerId,
+        phoneNumber: customerId,
+        sender: 'customer',
       }
-      
-      console.log('Emitting message to socket:', messagePayload)
-      socket.emit('message', messagePayload)
 
+      socket.emit('message', messagePayload)
     } catch (error) {
       console.error('Error in sendMessage:', error)
       set({ error: 'Failed to send message' })
@@ -167,16 +160,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   addMessage: (message: ChatMessage) => {
-    set((state) => ({ 
-      messages: [...state.messages, message] 
+    set((state) => ({
+      messages: [...state.messages, message],
     }))
   },
 
   loadSession: async (sessionId: string, customerId: string) => {
     try {
       console.log('Loading session:', { sessionId, customerId })
-      // You can implement this later when needed
-      // For now, just log that it was called
     } catch (error) {
       console.error('Error loading session:', error)
       set({ error: 'Failed to load session' })
@@ -192,8 +183,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
         body: JSON.stringify({
           title,
-          customerId
-        })
+          customerId,
+        }),
       })
 
       if (!response.ok) {

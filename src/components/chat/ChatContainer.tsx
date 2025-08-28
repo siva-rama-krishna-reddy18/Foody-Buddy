@@ -1,53 +1,62 @@
 // src/components/chat/ChatContainer.tsx
-import { useEffect } from 'react'
-import { useChatStore } from '../../stores/useChatStore'
-// import SessionHeader from './SessionHeader'
-import MessageList from './MessageList'
-import MessageInput from './MessageInput'
-import ConnectionStatus from './ConnectionStatus'
-
-// Temporary inline SessionHeader component
-function SessionHeader() {
-  return (
-    <div className="border-b p-4 bg-gray-50">
-      <h2 className="text-lg font-semibold text-gray-800">Foody Buddy ChatBot</h2>
-    </div>
-  )
-}
+import { useEffect } from 'react';
+import { useChatStore } from '../../stores/useChatStore';
+import ConnectionStatus from './ConnectionStatus';
+import MessageList from './MessageList';
+import MessageInput from './MessageInput';
+import QuickActions from './QuickActions';
 
 export default function ChatContainer() {
-  // Temporary hardcoded values
-  const sessionId = '68320f7c-5f09-4956-b211-218bc3245659'
-  const customerId = '+1234567890'
-  const initialTitle = 'Foody Buddy ChatBot'
+  // Hardcoded values for now (replace later with props or user context)
+  const sessionId = '68320f7c-5f09-4956-b211-218bc3245659';
+  const customerId = '+1234567890';
 
-  // Only destructure the properties that actually exist in your store
-  const { 
-    connect, 
-    disconnect, 
-    loadSession
-  } = useChatStore()
+  const { connect, disconnect } = useChatStore();
 
-  // Initialize connection and load session when component mounts
+  // Connect to socket when mounted
   useEffect(() => {
-    console.log('ChatContainer: Connecting with customerId:', customerId)
-    
-    // Connect to socket with customer ID
-    connect(customerId)
+    console.log('ChatContainer: Connecting with customerId:', customerId);
+    connect(customerId);
 
-    // Cleanup on unmount
     return () => {
-      console.log('ChatContainer: Cleaning up - disconnecting')
-      disconnect()
-    }
-  }, [connect, disconnect]) // Only depend on the functions, not customerId
+      console.log('ChatContainer: Cleaning up - disconnecting');
+      disconnect();
+    };
+  }, [connect, disconnect]);
 
   return (
-    <div className="flex flex-col h-full max-w-2xl mx-auto border rounded-lg">
+    <div className="flex flex-col h-full max-w-2xl mx-auto bg-white border rounded-2xl shadow-lg overflow-hidden">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+          🤖
+        </div>
+        <div>
+          <h3 className="font-semibold">FoodBot Assistant</h3>
+          <p className="text-sm opacity-80">Your personal food ordering companion</p>
+        </div>
+      </div>
+
+      {/* Connection Status */}
       <ConnectionStatus />
-      <SessionHeader />
-      <MessageList />
-      <MessageInput />
+
+      {/* Messages Area */}
+      <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-3">
+        {/* Initial Welcome Message + Quick Actions */}
+        <div className="flex gap-2 items-start">
+          <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center text-sm">🤖</div>
+          <div className="bg-gray-100 p-3 rounded-2xl text-sm text-gray-700 max-w-[80%]">
+            Welcome to Foody Buddy! I'm here to help you order delicious meals.  
+            What can I do for you today?
+            <QuickActions />
+          </div>
+        </div>
+
+        <MessageList />
+      </div>
+
+      {/* Input */}
+      <MessageInput customerId={customerId} />
     </div>
-  )
+  );
 }
