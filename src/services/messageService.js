@@ -1,94 +1,99 @@
+// src/services/messageService.js
 const { PrismaClient } = require('@prisma/client');
 const { v4: uuidv4 } = require('uuid');
 
 const prisma = new PrismaClient();
 
-class MessageService {
-    async saveMessage(sessionId, content, sender, messageType = 'text', metadata = null) {
-        try {
-            const now = new Date();
-            const message = await prisma.messages.create({
-                data: { id: uuidv4(), session_id: sessionId, content, sender, message_type: messageType, metadata, created_at: now }
-            });
+/**
+ * Persist a chat message and bump the session's updated_at.
+ */
+async function saveMessage(sessionId, content, sender, messageType = 'text', metadata = null) {
+  const id = uuidv4();
 
-            await prisma.chat_sessions.update({
-                where: { id: sessionId },
-                data: { updated_at: now }
-            });
-
-            return message;
-        } catch (err) {
-            const error = new Error('Failed to save message');
-            error.statusCode = 500;
-            error.isServiceError = true;
-            throw error;
-        }
+  const msg = await prisma.messages.create({
+    data: {
+      id,
+      session_id: sessionId,
+      content,
+      sender,                    // 'customer' | 'ai' | 'system'
+      message_type: messageType, // 'text' by default
+      metadata                   // JSON or null
     }
+  });
 
-    async getChatHistory(sessionId, limit = 50, offset = 0) {
-        try {
-            return await prisma.messages.findMany({
-                where: { session_id: sessionId },
-                orderBy: { created_at: 'asc' },
-                take: limit,
-                skip: offset
-            });
-        } catch (err) {
-            const error = new Error('Failed to fetch chat history');
-            error.statusCode = 500;
-            error.isServiceError = true;
-            throw error;
-        }
-    }
+  // Keep session fresh in lists
+  await prisma.chat_sessions.update({
+    where: { id: sessionId },
+    data: { updated_at: new Date() }
+  });
 
-    async updateMessage(messageId, content, customerId, metadata = null) {
-        try {
-            const message = await prisma.messages.findFirst({
-                where: { id: messageId, session: { customer_id: customerId } }
-            });
-            if (!message) {
-                const error = new Error('Message not found or access denied');
-                error.statusCode = 404;
-                error.isServiceError = true;
-                throw error;
-            }
-
-            return await prisma.messages.update({
-                where: { id: messageId },
-                data: { content, metadata }
-            });
-        } catch (err) {
-            if (err.isServiceError) throw err;
-            const error = new Error('Failed to update message');
-            error.statusCode = 500;
-            error.isServiceError = true;
-            throw error;
-        }
-    }
-
-    async deleteMessage(messageId, customerId) {
-        try {
-            const message = await prisma.messages.findFirst({
-                where: { id: messageId, session: { customer_id: customerId } }
-            });
-            if (!message) {
-                const error = new Error('Message not found or access denied');
-                error.statusCode = 404;
-                error.isServiceError = true;
-                throw error;
-            }
-
-            await prisma.messages.delete({ where: { id: messageId } });
-            return true;
-        } catch (err) {
-            if (err.isServiceError) throw err;
-            const error = new Error('Failed to delete message');
-            error.statusCode = 500;
-            error.isServiceError = true;
-            throw error;
-        }
-    }
-
+  return msg;
 }
 
-module.exports = new MessageService();
+/**
+ * Read chronological history (paged).
+ */
+async function getChatHistory(sessionId, limit = 50, offset = 0) {
+  return prisma.messages.findMany({
+    where: { session_id: sessionId },
+    orderBy: { created_at: 'asc' },
+    take: limit,
+    skip: offset
+  });
+}
+
+/**
+ * Update one message (authz: session must belong to customerId).
+ */
+async function updateMessage(messageId, content, customerId, metadata = null) {
+  const msg = await prisma.messages.findUnique({ where: { id: messageId } });
+  if (!msg) throw new Error('Message not found');
+
+  const session = await prisma.chat_sessions.findUnique({
+    where: { id: msg.session_id },
+    select: { customer_id: true }
+  });
+  if (!session || session.customer_id !== customerId) throw new Error('Access denied');
+
+  const updated = await prisma.messages.update({
+    where: { id: messageId },
+    data: { content, metadata }
+  });
+
+  await prisma.chat_sessions.update({
+    where: { id: msg.session_id },
+    data: { updated_at: new Date() }
+  });
+
+  return updated;
+}
+
+/**
+ * Delete one message (authz: session must belong to customerId).
+ */
+async function deleteMessage(messageId, customerId) {
+  const msg = await prisma.messages.findUnique({ where: { id: messageId } });
+  if (!msg) throw new Error('Message not found');
+
+  const session = await prisma.chat_sessions.findUnique({
+    where: { id: msg.session_id },
+    select: { customer_id: true }
+  });
+  if (!session || session.customer_id !== customerId) throw new Error('Access denied');
+
+  await prisma.messages.delete({ where: { id: messageId } });
+
+  await prisma.chat_sessions.update({
+    where: { id: msg.session_id },
+    data: { updated_at: new Date() }
+  });
+
+  return true;
+}
+
+module.exports = {
+  saveMessage,
+  getChatHistory,
+  updateMessage,
+  deleteMessage,
+};

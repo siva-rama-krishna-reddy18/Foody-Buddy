@@ -112,3 +112,16 @@ model messages {
   @@index([session_id, created_at])
   @@map("messages")
 }
+
+model Embedding {
+  id         String   @id @db.Uuid
+  ownerType  String   @map("owner_type")
+  ownerId    String   @map("owner_id")
+  content    String
+  embedding  Unsupported("vector")
+  metadata   Json?    @db.JsonB
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("embeddings")
+  @@index([ownerType, ownerId], map: "embeddings_owner_idx")
+}

@@ -1,203 +1,245 @@
-const chatService = require('../services/chatservice'); // sessions
-const messageService = require('../services/messageService'); // messages
-const aiResponseService = require('../services/aiResponseService'); // AI
+// const chatService = require('../services/chatservice'); // sessions
+// const messageService = require('../services/messageService'); // messages
+// const orchestratorService = require('../services/orchestratorService'); // RAG + HF
+// //const messageService = require('../services/messageService');
+// const { onUserMessage } = require('../services/onMessages');
+// class ChatController {
+//     async createSession(req, res, next) {
+//         try {
+//             const { customerId, title } = req.body;
 
-class ChatController {
-    async createSession(req, res, next) {
-        try {
-            const { customerId, title } = req.body;
+//             if (!customerId) {
+//                 return res.status(400).json({
+//                     success: false,
+//                     error: 'Customer ID is required'
+//                 });
+//             }
 
-            if (!customerId) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Customer ID is required'
-                });
-            }
+//             const session = await chatService.createSession(customerId, title);
 
-            const session = await chatService.createSession(customerId, title);
+//             res.status(201).json({
+//                 success: true,
+//                 data: { session },
+//                 message: 'Chat session created successfully'
+//             });
+//         } catch (error) {
+//             next(error);
+//         }
+//     }
 
-            res.status(201).json({
-                success: true,
-                data: { session },
-                message: 'Chat session created successfully'
-            });
-        } catch (error) {
-            next(error);
-        }
-    }
+//     async getSessions(req, res, next) {
+//         try {
+//             const { customerId, limit } = req.query;
 
-    async getSessions(req, res, next) {
-        try {
-            const { customerId, limit } = req.query;
+//             if (!customerId) {
+//                 return res.status(400).json({
+//                     success: false,
+//                     error: 'Customer ID is required'
+//                 });
+//             }
 
-            if (!customerId) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Customer ID is required'
-                });
-            }
+//             const sessions = await chatService.getUserSessions(
+//                 customerId,
+//                 limit ? parseInt(limit, 10) : 20
+//             );
 
-            const sessions = await chatService.getUserSessions(customerId, limit ? parseInt(limit) : 20);
+//             res.status(200).json({
+//                 success: true,
+//                 data: { sessions }
+//             });
+//         } catch (error) {
+//             next(error);
+//         }
+//     }
 
-            res.status(200).json({
-                success: true,
-                data: { sessions }
-            });
-        } catch (error) {
-            next(error);
-        }
-    }
+//     async getMessages(req, res, next) {
+//         try {
+//             const { sessionId } = req.params;
+//             const { customerId, limit, offset } = req.query;
 
-    async getMessages(req, res, next) {
-        try {
-            const { sessionId } = req.params;
-            const { customerId, limit, offset } = req.query;
+//             if (!customerId) {
+//                 return res.status(400).json({
+//                     success: false,
+//                     error: 'Customer ID is required'
+//                 });
+//             }
 
-            if (!customerId) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Customer ID is required'
-                });
-            }
+//             const session = await chatService.getSessionById(sessionId);
+//             if (!session || session.customer_id !== customerId) {
+//                 return res.status(404).json({
+//                     success: false,
+//                     error: 'Session not found or access denied'
+//                 });
+//             }
 
-            const session = await chatService.getSessionById(sessionId);
-            if (!session || session.customer_id !== customerId) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Session not found or access denied'
-                });
-            }
+//             const messages = await messageService.getChatHistory(
+//                 sessionId,
+//                 limit ? parseInt(limit, 10) : 50,
+//                 offset ? parseInt(offset, 10) : 0
+//             );
 
-            const messages = await messageService.getChatHistory(
-                sessionId,
-                limit ? parseInt(limit) : 50,
-                offset ? parseInt(offset) : 0
-            );
+//             res.status(200).json({
+//                 success: true,
+//                 data: { messages, session }
+//             });
+//         } catch (error) {
+//             next(error);
+//         }
+//     }
 
-            res.status(200).json({
-                success: true,
-                data: { messages, session }
-            });
-        } catch (error) {
-            next(error);
-        }
-    }
+    
+    
+// // controllers/chatController.js
 
-    async sendMessage(req, res, next) {
-        try {
-            const { sessionId, customerId, content, messageType } = req.body;
 
-            if (!sessionId || !customerId || !content) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Session ID, customer ID, and content are required'
-                });
-            }
+// async sendMessage(req, res, next) {
+//   try {
+//     const { sessionId, customerId, content, messageType = 'text' } = req.body;
 
-            const session = await chatService.getSessionById(sessionId);
-            if (!session || session.customer_id !== customerId) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Session not found or access denied'
-                });
-            }
+//     // 1) store user message
+//     const userMessage = await messageService.saveMessage(sessionId, content, 'customer', messageType);
 
-            // Save user message via messageService
-            const message = await messageService.saveMessage(sessionId, content, 'customer', messageType);
+//     // 2) orchestrate
+//     await onUserMessage({ sessionId, customerId, content });
 
-            // Generate AI response via aiResponseService
-            const aiResponseText = await aiResponseService.getAIResponse(content, sessionId);
+//     // 3) fetch last AI message to return
+//     const messages = await messageService.getChatHistory(sessionId, 1, 0);
+//     const aiMessage = messages[0];
 
-            // Save AI response via messageService
-            const aiResponse = await messageService.saveMessage(sessionId, aiResponseText, 'ai', 'text');
+//     res.status(200).json({ success: true, data: { userMessage, aiMessage } });
+//   } catch (err) { next(err); }
+// }
 
-            res.status(200).json({
-                success: true,
-                data: { userMessage: message, aiMessage: aiResponse }
-            });
-        } catch (error) {
-            next(error);
-        }
-    }
 
-    async deleteSession(req, res, next) {
-        try {
-            const { sessionId } = req.params;
-            const { customerId } = req.query;
+//     // async sendMessage(req, res, next) {
+//     //     try {
+//     //         const { sessionId, customerId, content, messageType } = req.body;
 
-            if (!customerId) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Customer ID is required'
-                });
-            }
+//     //         if (!sessionId || !customerId || !content) {
+//     //             return res.status(400).json({
+//     //                 success: false,
+//     //                 error: 'Session ID, customer ID, and content are required'
+//     //             });
+//     //         }
 
-            await chatService.deleteSession(sessionId, customerId);
+//     //         const session = await chatService.getSessionById(sessionId);
+//     //         if (!session || session.customer_id !== customerId) {
+//     //             return res.status(404).json({
+//     //                 success: false,
+//     //                 error: 'Session not found or access denied'
+//     //             });
+//     //         }
 
-            res.status(200).json({
-                success: true,
-                message: 'Session deleted successfully'
-            });
-        } catch (error) {
-            next(error);
-        }
-    }
+//     //         // 1) Save user message (embeddings handled inside messageService)
+//     //         const userMessage = await messageService.saveMessage(
+//     //             sessionId,
+//     //             content,
+//     //             'customer',
+//     //             messageType
+//     //         );
 
-    // NEW WEEK 2 METHODS
-    async updateSessionTitle(req, res, next) {
-        try {
-            const { sessionId } = req.params;
-            const { title, customerId } = req.body;
+//     //         // 2) Orchestrate AI (retrieves context + generates HF response)
+//     //         const { aiText } = await orchestratorService.respondToMessage({
+//     //             sessionId,
+//     //             customerId,
+//     //             content
+//     //         });
 
-            if (!title || !customerId) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Title and customer ID are required'
-                });
-            }
+//     //         // 3) Save AI message (embeddings handled inside messageService)
+//     //         const aiMessage = await messageService.saveMessage(
+//     //             sessionId,
+//     //             aiText,
+//     //             'ai',
+//     //             'text'
+//     //         );
 
-            const session = await chatService.getSessionById(sessionId);
-            if (!session || session.customer_id !== customerId) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Session not found or access denied'
-                });
-            }
+//     //         res.status(200).json({
+//     //             success: true,
+//     //             data: { userMessage, aiMessage }
+//     //         });
+//     //     } catch (error) {
+//     //         next(error);
+//     //     }
+//     // }
 
-            const updatedSession = await chatService.updateSessionTitle(sessionId, title);
+//     // async deleteSession(req, res, next) {
+//     //     try {
+//     //         const { sessionId } = req.params;
+//     //         const { customerId } = req.query;
 
-            res.status(200).json({
-                success: true,
-                data: { session: updatedSession },
-                message: 'Session title updated successfully'
-            });
-        } catch (error) {
-            next(error);
-        }
-    }
+//     //         if (!customerId) {
+//     //             return res.status(400).json({
+//     //                 success: false,
+//     //                 error: 'Customer ID is required'
+//     //             });
+//     //         }
 
-    async getSessionWithMessages(req, res, next) {
-        try {
-            const { sessionId } = req.params;
-            const { customerId } = req.query;
+//     //         await chatService.deleteSession(sessionId, customerId);
 
-            if (!customerId) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Customer ID is required'
-                });
-            }
+//     //         res.status(200).json({
+//     //             success: true,
+//     //             message: 'Session deleted successfully'
+//     //         });
+//     //     } catch (error) {
+//     //         next(error);
+//     //     }
+//     // }
 
-            const sessionData = await chatService.getSessionWithMessages(sessionId, customerId);
+//     // NEW WEEK 2 METHODS
+//     async updateSessionTitle(req, res, next) {
+//         try {
+//             const { sessionId } = req.params;
+//             const { title, customerId } = req.body;
 
-            res.status(200).json({
-                success: true,
-                data: sessionData
-            });
-        } catch (error) {
-            next(error);
-        }
-    }
-}
+//             if (!title || !customerId) {
+//                 return res.status(400).json({
+//                     success: false,
+//                     error: 'Title and customer ID are required'
+//                 });
+//             }
 
-module.exports = new ChatController();
+//             const session = await chatService.getSessionById(sessionId);
+//             if (!session || session.customer_id !== customerId) {
+//                 return res.status(404).json({
+//                     success: false,
+//                     error: 'Session not found or access denied'
+//                 });
+//             }
+
+//             const updatedSession = await chatService.updateSessionTitle(sessionId, title);
+
+//             res.status(200).json({
+//                 success: true,
+//                 data: { session: updatedSession },
+//                 message: 'Session title updated successfully'
+//             });
+//         } catch (error) {
+//             next(error);
+//         }
+//     }
+
+//     async getSessionWithMessages(req, res, next) {
+//         try {
+//             const { sessionId } = req.params;
+//             const { customerId } = req.query;
+
+//             if (!customerId) {
+//                 return res.status(400).json({
+//                     success: false,
+//                     error: 'Customer ID is required'
+//                 });
+//             }
+
+//             const sessionData = await chatService.getSessionWithMessages(sessionId, customerId);
+
+//             res.status(200).json({
+//                 success: true,
+//                 data: sessionData
+//             });
+//         } catch (error) {
+//             next(error);
+//         }
+//     }
+// }
+
+// module.exports = new ChatController();
