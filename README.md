@@ -13,6 +13,8 @@ CHAT PAGE: http://localhost:5173/chat
 
 ## Changelog
 
+08/31/2025 5:05PM CST - Cart UI Update, with functional quantity change and cart item delete functionalities.
+
 08/20/2025 4:05PM CST - Week 2 Update compatible with the updated Week 2 Backend, per the team's update requirements.
 
 08/16/2025 3:00PM CST - Updated useChatStore.ts and socketClient.ts for integration with the backend.
