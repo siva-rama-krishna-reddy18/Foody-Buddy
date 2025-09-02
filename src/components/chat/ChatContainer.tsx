@@ -1,90 +1,204 @@
 // src/components/chat/ChatContainer.tsx
-import { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Send, ShoppingBag, MessageCircle, Menu, Star, Package, Clock } from 'lucide-react';
 import { useChatStore } from '../../stores/useChatStore';
-import ConnectionStatus from './ConnectionStatus';
-import MessageList from './MessageList';
-import MessageInput from './MessageInput';
-import QuickActions from './QuickActions';
-import CartDrawer from '../cart/CartDrawer'; // adjust path if needed
+import { useCartStore } from '../../stores/useCartStore';
+import MessageBubble from './MessageBubble';
+import CartDrawer from '../cart/CartDrawer';
 
-interface CartItem {
-  id: string;
-  name: string;
-  quantity: number;
-  price: number;
+interface Props {
+  customerId: string;
 }
 
-export default function ChatContainer() {
-  const customerId = '+1234567890';
-  const { connect, disconnect } = useChatStore();
-
+export default function ChatContainer({ customerId }: Props) {
+  const [inputText, setInputText] = useState('');
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [cartItems, setCartItems] = useState<CartItem[]>([
-    // demo items for testing
-    { id: '1', name: 'Margherita Pizza', quantity: 1, price: 12 },
-    { id: '2', name: 'Veggie Burger', quantity: 2, price: 8 },
-  ]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  const {
+    messages,
+    isLoading,
+    sendMessage,
+    sendQuickAction,
+    addProductToCart,
+    initializeChat
+  } = useChatStore();
 
-  // Socket connection
+  const { itemCount, loadCart } = useCartStore();
+
+  // Initialize chat and load cart when component mounts
   useEffect(() => {
-    connect(customerId);
-    return () => disconnect();
-  }, [connect, disconnect]);
+    if (customerId) {
+      initializeChat(customerId);
+      loadCart(customerId);
+    }
+  }, [customerId, initializeChat, loadCart]);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputText.trim() || isLoading) return;
+
+    const messageText = inputText.trim();
+    setInputText('');
+    await sendMessage(messageText);
+  };
+
+  const handleSuggestionClick = async (suggestion: string) => {
+    await sendQuickAction(suggestion);
+  };
+
+  const handleAddToCart = async (product: any) => {
+    await addProductToCart(product);
+  };
+
+  // Navigation button handlers
+  const handleViewMenu = async () => {
+    await sendMessage("Show me the menu");
+  };
+
+  const handleTrackOrders = async () => {
+    await sendMessage("Track my orders");
+  };
+
+  const handleTodaysSpecials = async () => {
+    await sendMessage("What are today's specials?");
+  };
+
+  const handleShowCart = async () => {
+    setIsCartOpen(true); // Open cart drawer directly
+  };
 
   return (
-    <div className="flex flex-col h-full max-w-2xl mx-auto bg-white border rounded-2xl shadow-lg overflow-hidden">
+    <div className="flex flex-col h-screen bg-blue-50">
       {/* Header */}
-      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">🤖</div>
-        <div>
-          <h3 className="font-semibold">FoodBot Assistant</h3>
-          <p className="text-sm opacity-80">Your personal food ordering companion</p>
+      <div className="bg-white/10 backdrop-blur-md border-b border-white/20 px-4 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
+              <MessageCircle className="w-5 h-5 text-black" />
+            </div>
+            <div>
+              <h1 className="text-black font-semibold text-lg">FoodyBuddy Assistant</h1>
+              <p className="text-black/70 text-sm">Your personal food ordering assistant</p>
+            </div>
+          </div>
+
+          {/* Navigation Buttons */}
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleViewMenu}
+              className="flex flex-col items-center space-y-1 bg-gray-200 hover:bg-white/30 backdrop-blur-sm rounded-xl p-3 text-black font-medium transition-all duration-200 hover:scale-105 border border-white/20"
+            >
+              <Menu className="w-4 h-4" />
+              <span className="text-xs">View Menu</span>
+            </button>
+            
+            <button
+              onClick={handleTrackOrders}
+              className="flex flex-col items-center space-y-1 bg-gray-200 hover:bg-white/30 backdrop-blur-sm rounded-xl p-3 text-black font-medium transition-all duration-200 hover:scale-105 border border-white/20"
+            >
+              <Package className="w-4 h-4" />
+              <span className="text-xs">Track Orders</span>
+            </button>
+            
+            <button
+              onClick={handleTodaysSpecials}
+              className="flex flex-col items-center space-y-1 bg-gray-200 hover:bg-white/30 backdrop-blur-sm rounded-xl p-3 text-black font-medium transition-all duration-200 hover:scale-105 border border-white/20"
+            >
+              <Star className="w-4 h-4" />
+              <span className="text-xs">Today's Specials</span>
+            </button>
+            
+            <button
+              onClick={handleShowCart}
+              className="flex flex-col items-center space-y-1 bg-gray-200 hover:bg-white/30 backdrop-blur-sm rounded-xl p-3 text-black font-medium transition-all duration-200 hover:scale-105 border border-white/20"
+            >
+              <ShoppingBag className="w-4 h-4" />
+              <span className="text-xs">Show my cart</span>
+            </button>
+          </div>
+          
+          {/* Cart Button */}
+          <button
+            onClick={() => setIsCartOpen(true)}
+            className="relative bg-gray-200 hover:bg-white/30 backdrop-blur-sm text-black px-4 py-2 rounded-full flex items-center space-x-2 transition-colors"
+          >
+            <ShoppingBag className="w-4 h-4" />
+            <span className="text-black font-medium">Your Order</span>
+            {itemCount > 0 && (
+              <div className="absolute -top-2 -right-2 bg-red-500 text-black text-xs w-5 h-5 rounded-full flex items-center justify-center font-bold">
+                {itemCount}
+              </div>
+            )}
+          </button>
         </div>
       </div>
-
-      <ConnectionStatus />
 
       {/* Messages */}
-      <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-3">
-        <div className="flex gap-2 items-start">
-          <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center text-sm">🤖</div>
-          <div className="bg-gray-100 p-3 rounded-2xl text-sm text-gray-700 max-w-[80%]">
-            Welcome to Foody Buddy! I'm here to help you order delicious meals.
-            <QuickActions />
-          </div>
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <div className="max-w-2xl mx-auto">
+          {messages.map((message, index) => (
+            <MessageBubble
+              key={`${message.id || index}`}
+              message={message}
+              onAddToCart={handleAddToCart}
+              onSuggestionClick={handleSuggestionClick}
+            />
+          ))}
+          
+          {isLoading && (
+            <div className="flex justify-start">
+              <div className="bg-white/90 backdrop-blur-sm rounded-2xl rounded-bl-md px-4 py-3 shadow-sm border">
+                <div className="flex space-x-2">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          <div ref={messagesEndRef} />
         </div>
-
-        <MessageList />
-      </div>
-
-      {/* --- Keep this one as the ONLY Cart button --- */}
-      <div className="p-2 border-t flex justify-center bg-gray-50">
-        <button
-          onClick={() => setIsCartOpen(true)}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-        >
-          View Cart ({cartItems.length})
-        </button>
       </div>
 
       {/* Input */}
-      <MessageInput customerId={customerId} />
+      <div className="bg-white border-t border-gray-200 px-4 py-4">
+        <div className="max-w-2xl mx-auto">
+          <form onSubmit={handleSendMessage} className="flex items-center space-x-3">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Type your message..."
+              className="flex-1 bg-gray-100 border-0 rounded-full px-4 py-3 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:bg-white transition-colors"
+              disabled={isLoading}
+            />
+            <button
+              type="submit"
+              disabled={!inputText.trim() || isLoading}
+              className="bg-blue-500 hover:bg-blue-600 disabled:bg-green-300 text-white p-3 rounded-full transition-colors"
+            >
+              <Send className="w-5 h-5" />
+            </button>
+          </form>
+          
+          <div className="text-center text-xs text-gray-500 mt-2">
+            Items in your cart
+          </div>
+        </div>
+      </div>
 
-      {/* Drawer */}
+      {/* Cart Drawer */}
       <CartDrawer
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
-        items={cartItems}
-        onUpdateQuantity={(id, newQty) =>
-          setCartItems((prev) =>
-            prev.map((it) =>
-              it.id === id ? { ...it, quantity: Math.max(1, newQty) } : it
-            )
-          )
-        }
-        onRemoveItem={(id) =>
-          setCartItems((prev) => prev.filter((it) => it.id !== id))
-        }
+        customerId={customerId}
       />
     </div>
   );

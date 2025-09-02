@@ -1,131 +1,196 @@
 // src/components/cart/CartDrawer.tsx
-import { Fragment } from 'react'
-import { Dialog, Transition } from '@headlessui/react'
+import React from 'react';
+import { X, Plus, Minus, ShoppingBag, CreditCard } from 'lucide-react';
+import { useCartStore } from '../../stores/useCartStore';
+import { api } from '../../services/api/ApiClient';
 
 interface CartItem {
-  id: string
-  name: string
-  quantity: number
-  price: number
+  id: string;
+  productId: string;
+  name: string;
+  price: number;
+  quantity: number;
+  total: number;
 }
 
-interface CartDrawerProps {
-  isOpen: boolean
-  onClose: () => void
-  items: CartItem[]
-  onUpdateQuantity: (id: string, quantity: number) => void
-  onRemoveItem: (id: string) => void
+interface Props {
+  isOpen: boolean;
+  onClose: () => void;
+  customerId: string;
 }
 
-export default function CartDrawer({
-  isOpen,
-  onClose,
-  items,
-  onUpdateQuantity,
-  onRemoveItem,
-}: CartDrawerProps) {
-  const total = items.reduce((sum, item) => sum + item.quantity * item.price, 0)
+export default function CartDrawer({ isOpen, onClose, customerId }: Props) {
+  const { items, isLoading, updateQuantity, removeItem, clearCart } = useCartStore();
+  const [isOrdering, setIsOrdering] = React.useState(false);
+
+  const handleQuantityChange = async (item: CartItem, newQuantity: number) => {
+    if (newQuantity <= 0) {
+      await removeItem(customerId, item.productId);
+    } else {
+      await updateQuantity(customerId, item.productId, newQuantity);
+    }
+  };
+
+  const handleRemoveItem = async (item: CartItem) => {
+    await removeItem(customerId, item.productId);
+  };
+
+  const handlePlaceOrder = async () => {
+    if (items.length === 0) return;
+    
+    setIsOrdering(true);
+    try {
+      const orderItems = items.map(item => ({
+        productId: item.productId,
+        quantity: item.quantity
+      }));
+
+      const response = await api.orders.placeOrder({
+        customerId,
+        items: orderItems,
+        paymentMethod: 'CARD'
+      });
+
+      if (response.success) {
+        await clearCart(customerId);
+        alert(`Order placed successfully! Order #${response.data.orderNumber}\nEstimated delivery: ${response.data.estimatedDelivery}`);
+        onClose();
+      }
+    } catch (error) {
+      console.error('Order placement error:', error);
+      alert('Failed to place order. Please try again.');
+    } finally {
+      setIsOrdering(false);
+    }
+  };
+
+  const calculateTotal = () => {
+    return items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  };
+
+  const getTotalItems = () => {
+    return items.reduce((sum, item) => sum + item.quantity, 0);
+  };
+
+  if (!isOpen) return null;
 
   return (
-    <Transition.Root show={isOpen} as={Fragment}>
-      <Dialog as="div" className="relative z-50" onClose={onClose}>
-        <Transition.Child
-          as={Fragment}
-          enter="ease-out duration-300"
-          enterFrom="opacity-0"
-          enterTo="opacity-100"
-          leave="ease-in duration-200"
-          leaveFrom="opacity-100"
-          leaveTo="opacity-0"
-        >
-          <div className="fixed inset-0 bg-black/40" />
-        </Transition.Child>
+    <div className="fixed inset-0 z-50 overflow-hidden">
+      {/* Backdrop */}
+      <div 
+        className="absolute inset-0 bg-black bg-opacity-50" 
+        onClick={onClose}
+      />
+      
+      {/* Cart Panel */}
+      <div className="absolute right-0 top-0 h-full w-full max-w-sm bg-white shadow-xl">
+        <div className="flex h-full flex-col">
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-4">
+            <div className="flex items-center space-x-2">
+              <ShoppingBag className="h-5 w-5 text-gray-600" />
+              <h2 className="text-lg font-semibold text-gray-900">Your Order</h2>
+            </div>
+            <button
+              onClick={onClose}
+              className="rounded-full p-2 text-gray-400 hover:text-gray-600"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
 
-        <div className="fixed inset-0 flex justify-center items-end sm:items-center">
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-300"
-            enterFrom="translate-y-full sm:translate-y-0 sm:scale-95"
-            enterTo="translate-y-0 sm:scale-100"
-            leave="ease-in duration-200"
-            leaveFrom="translate-y-0 sm:scale-100"
-            leaveTo="translate-y-full sm:translate-y-0 sm:scale-95"
-          >
-            <Dialog.Panel className="relative bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl shadow-xl overflow-hidden">
-              {/* Header */}
-              <div className="p-4 border-b flex justify-between items-center">
-                <Dialog.Title className="text-lg font-semibold">
-                  Your Cart
-                </Dialog.Title>
-                <button onClick={onClose} className="text-gray-500 hover:text-gray-800">
-                  ✕
-                </button>
+          {/* Cart Content */}
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
               </div>
-
-              {/* Cart Items */}
-              <div className="p-4 max-h-80 overflow-y-auto space-y-4">
-                {items.length === 0 ? (
-                  <p className="text-gray-500 text-center">Your cart is empty</p>
-                ) : (
-                  items.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex justify-between items-center border rounded-lg p-3"
-                    >
+            ) : items.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <ShoppingBag className="h-16 w-16 text-gray-300 mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Your cart is empty</h3>
+                <p className="text-gray-600 text-sm">Add items from the menu to get started!</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {items.map((item) => (
+                  <div key={item.id} className="bg-gray-50 rounded-xl p-4">
+                    <div className="flex justify-between items-start mb-2">
                       <div className="flex-1">
-                        <p className="font-medium">{item.name}</p>
-                        <p className="text-sm text-gray-500">
-                          ${(item.price * item.quantity).toFixed(2)}
-                        </p>
+                        <h3 className="font-medium text-gray-900 text-sm">{item.name}</h3>
+                        <p className="text-blue-600 font-semibold">${item.price.toFixed(2)}</p>
                       </div>
-
-                      {/* Quantity Controls */}
-                      <div className="flex items-center space-x-2">
-                        <button
-                          onClick={() => onUpdateQuantity(item.id, item.quantity - 1)}
-                          disabled={item.quantity <= 1}
-                          className="px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-                        >
-                          −
-                        </button>
-                        <span>{item.quantity}</span>
-                        <button
-                          onClick={() => onUpdateQuantity(item.id, item.quantity + 1)}
-                          className="px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
-                        >
-                          +
-                        </button>
-                      </div>
-
-                      {/* Remove Button */}
                       <button
-                        onClick={() => onRemoveItem(item.id)}
-                        className="ml-3 text-red-500 hover:text-red-700"
+                        onClick={() => handleRemoveItem(item)}
+                        className="text-red-500 hover:text-red-700 p-1"
                       >
-                        🗑
+                        <X className="h-4 w-4" />
                       </button>
                     </div>
-                  ))
-                )}
+                    
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <button
+                          onClick={() => handleQuantityChange(item, item.quantity - 1)}
+                          className="w-8 h-8 rounded-full bg-white border border-gray-300 flex items-center justify-center hover:bg-gray-50"
+                        >
+                          <Minus className="h-3 w-3" />
+                        </button>
+                        <span className="font-medium text-gray-900 min-w-[20px] text-center">
+                          {item.quantity}
+                        </span>
+                        <button
+                          onClick={() => handleQuantityChange(item, item.quantity + 1)}
+                          className="w-8 h-8 rounded-full bg-white border border-gray-300 flex items-center justify-center hover:bg-gray-50"
+                        >
+                          <Plus className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <span className="font-semibold text-gray-900">
+                        ${(item.price * item.quantity).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          {items.length > 0 && (
+            <div className="border-t border-gray-200 px-4 py-4 space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-lg font-semibold text-gray-900">Total</span>
+                <span className="text-xl font-bold text-gray-900">
+                  ${calculateTotal().toFixed(2)}
+                </span>
+              </div>
+              
+              <div className="text-xs text-gray-600 text-center">
+                {getTotalItems()} item{getTotalItems() !== 1 ? 's' : ''} • Delivery in 30-45 mins
               </div>
 
-              {/* Footer */}
-              <div className="p-4 border-t">
-                <div className="flex justify-between text-lg font-semibold">
-                  <span>Total</span>
-                  <span>${total.toFixed(2)}</span>
-                </div>
-                <button
-                  disabled={items.length === 0}
-                  className="w-full mt-3 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300"
-                >
-                  Proceed to Checkout
-                </button>
-              </div>
-            </Dialog.Panel>
-          </Transition.Child>
+              <button
+                onClick={handlePlaceOrder}
+                disabled={isOrdering}
+                className="w-full bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white py-3 rounded-xl font-semibold flex items-center justify-center space-x-2 transition-colors"
+              >
+                {isOrdering ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Placing Order...</span>
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="h-4 w-4" />
+                    <span>Place Order</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
-      </Dialog>
-    </Transition.Root>
-  )
+      </div>
+    </div>
+  );
 }
