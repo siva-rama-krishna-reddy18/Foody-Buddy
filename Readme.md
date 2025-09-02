@@ -41,9 +41,9 @@
 - Maintained backward compatibility with Week 1 features
 
 **Week 3 Added Features**
-Added Chat-based cart management ("Add X to cart", "Show my cart")
-Implemented Direct cart API operations
-Added Order placement with proper order numbers
-Added Cart clearing after orders
-Added Product search and recommendations via chat
-Added Preference learning through conversation
+- Added Chat-based cart management ("Add X to cart", "Show my cart")
+- Implemented Direct cart API operations
+- Added Order placement with proper order numbers
+- Added Cart clearing after orders
+- Added Product search and recommendations via chat
+- Added Preference learning through conversation
