@@ -1,46 +1,44 @@
 // src/services/embeddingService.js
-const { HfInference } = require('@huggingface/inference');
-
 const DEBUG = process.env.NODE_ENV === 'development';
 
-// Initialize Hugging Face client
-let hf;
+// Use a different variable name to avoid conflicts
+let embeddingClient;
+let embeddingEnabled = false;
+
 try {
-  hf = new HfInference(process.env.HUGGINGFACE_API_KEY);
+  if (process.env.HUGGINGFACE_API_KEY && process.env.HUGGINGFACE_API_KEY !== 'test_key') {
+    const { HfInference } = require('@huggingface/inference');
+    embeddingClient = new HfInference(process.env.HUGGINGFACE_API_KEY);
+    embeddingEnabled = true;
+    if (DEBUG) console.log('[EMBEDDING] Service initialized');
+  } else {
+    if (DEBUG) console.log('[EMBEDDING] API key not configured');
+  }
 } catch (error) {
-  console.warn('[EMBEDDING] Hugging Face not configured, embeddings disabled');
+  console.warn('[EMBEDDING] Initialization failed:', error.message);
 }
 
 async function generateEmbedding(text) {
   try {
-    if (!hf) {
-      if (DEBUG) console.log('[EMBEDDING] Hugging Face not available, skipping embedding');
+    if (!embeddingEnabled || !embeddingClient) {
+      if (DEBUG) console.log('[EMBEDDING] Service not available');
       return null;
     }
     
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
-      console.warn('[EMBEDDING] Invalid text provided for embedding');
       return null;
     }
     
-    if (DEBUG) console.log(`[EMBEDDING] Generating embedding for: "${text.substring(0, 50)}..."`);
+    if (DEBUG) console.log(`[EMBEDDING] Generating embedding...`);
     
-    const result = await hf.featureExtraction({
+    const result = await embeddingClient.featureExtraction({
       model: 'BAAI/bge-small-en-v1.5',
       inputs: text.trim()
     });
     
-    let embedding;
-    if (Array.isArray(result)) {
-      embedding = Array.isArray(result[0]) ? result[0] : result;
-    } else if (result && typeof result === 'object' && result.data) {
-      embedding = result.data;
-    } else {
-      embedding = result;
-    }
+    let embedding = Array.isArray(result) ? (Array.isArray(result[0]) ? result[0] : result) : result;
     
     if (!Array.isArray(embedding) || embedding.length === 0) {
-      console.warn('[EMBEDDING] Invalid embedding format received');
       return null;
     }
     
@@ -48,17 +46,9 @@ async function generateEmbedding(text) {
     return embedding;
     
   } catch (error) {
-    if (error.message?.includes('permission') || error.message?.includes('auth')) {
-      if (DEBUG) console.log('[EMBEDDING] API permission issue, skipping embedding');
-    } else {
-      console.error('[EMBEDDING] Generation error:', error.message);
-    }
+    console.error('[EMBEDDING] Error:', error.message);
     return null;
   }
-}
-
-if (DEBUG) {
-  console.log('[EMBEDDING] Service loaded');
 }
 
 module.exports = {

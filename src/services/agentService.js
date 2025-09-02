@@ -239,72 +239,57 @@ class AgentService {
   }
 
   async handleOrderStatus(customerId) {
+  try {
+    console.log('[Agent] Checking orders for customer:', customerId);
+    let orders = [];
+    
     try {
-      let orders = [];
-      
-      try {
-        orders = await prisma.order.findMany({
-          where: { customer_id: customerId },
-          orderBy: { created_at: 'desc' },
-          take: 5,
-          include: {
-            order_items: {
-              take: 3,
-              include: {
-                product: true
-              }
-            }
+      orders = await prisma.order.findMany({
+        where: { customerId: customerId },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        include: {
+          orderLineItems: {
+            take: 3
           }
-        });
-      } catch (error) {
-        try {
-          orders = await prisma.order.findMany({
-            where: { customerId: customerId },
-            orderBy: { createdAt: 'desc' },
-            take: 5,
-            include: {
-              orderLineItems: {
-                take: 3
-              }
-            }
-          });
-        } catch (fallbackError) {
-          if (DEBUG) console.log('[Agent] Order status lookup failed:', fallbackError.message);
         }
-      }
-
-      if (orders.length === 0) {
-        return "You don't have any recent orders. Would you like to place a new order? I can show you our popular items or help you search for something specific!";
-      }
-
-      const orderList = orders.map(order => {
-        let items = '';
-        let status = '';
-        let total = '';
-        let date = '';
-        
-        if (order.order_items) {
-          items = order.order_items.slice(0, 2).map(item => item.product?.name || 'Item').join(', ');
-          status = order.status || 'Completed';
-          total = order.total_amount || '0';
-          date = new Date(order.created_at).toLocaleDateString();
-        } else if (order.orderLineItems) {
-          items = order.orderLineItems.slice(0, 2).map(item => item.productName).join(', ');
-          status = order.status || 'Completed';
-          total = order.total || '0';
-          date = new Date(order.createdAt).toLocaleDateString();
-        }
-
-        return `${items} - ${status} (${date}) - $${total}`;
-      }).join('\n');
-
-      return `Here are your recent orders:\n\n${orderList}\n\nWould you like to reorder any of these items or place a new order?`;
+      });
     } catch (error) {
-      console.error('[Agent] Order status error:', error);
-      return "I'm having trouble accessing your order history right now. Would you like to place a new order instead?";
+      console.log('[Agent] Order lookup failed:', error.message);
     }
-  }
 
+    if (orders.length === 0) {
+      return "You don't have any recent orders. Would you like to place a new order? I can show you our popular items or help you search for something specific!";
+    }
+
+    const orderList = orders.map(order => {
+      let items = 'Order items';
+      let status = order.status || 'Completed';
+      
+      // Calculate total amount
+      let total = '0';
+      if (order.amount && order.amount > 0) {
+        total = order.amount;
+      } else if (order.total_amount && order.total_amount > 0) {
+        total = order.total_amount;
+      } else if (order.orderLineItems && order.orderLineItems.length > 0) {
+        const calculatedTotal = order.orderLineItems.reduce((sum, item) => {
+          return sum + (parseFloat(item.price || 0) * item.quantity);
+        }, 0);
+        total = calculatedTotal > 0 ? calculatedTotal.toFixed(2) : '0';
+      }
+      
+      const date = new Date(order.createdAt || order.created_at).toLocaleDateString();
+      
+      return `${status} (${date}) - $${total}`;
+    }).join('\n'); // Change this from space to \n for line breaks
+
+    return `Here are your recent orders:\n\n${orderList}\n\nWould you like to reorder any of these items or place a new order?`;
+  } catch (error) {
+    console.error('[Agent] Order status error:', error);
+    return "I'm having trouble accessing your order history right now. Would you like to place a new order instead?";
+  }
+}
   async handleRecommendations(customerId) {
     try {
       // Get personalized recommendations based on order history

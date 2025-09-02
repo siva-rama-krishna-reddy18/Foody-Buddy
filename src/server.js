@@ -304,6 +304,7 @@ async function startServer() {
     });
 }
 
+
 // Internal health check function
 async function performHealthCheck() {
     const http = require('http');
