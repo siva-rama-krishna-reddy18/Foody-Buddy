@@ -111,6 +111,13 @@ app.get('/health', async (req, res) => {
     }
 });
 
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString() 
+  });
+});
+
 // Enhanced root endpoint with API documentation
 app.get('/', (req, res) => {
     res.json({ 
