@@ -25,7 +25,3 @@ NOTE: Remember to fix the hardcoded URL value and the rule-based responses in th
 08/15/2025 11:45PM CST - Removed Login, Register, User Authentication functionalities.
 
 08/15/2025 11:00AM CST - Completed: Project Foundation Setup; Core Chat System; User Authentication
-
-Pending:
-
-Test Cases: Jest test suite is incompatible with React 19, and is breaking the dev instance.
