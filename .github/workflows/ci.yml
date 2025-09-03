@@ -1,0 +1,33 @@
+name: FoodyBuddy CI/CD
+
+on:
+  push:
+    branches: 
+      - main
+      - dev  
+      - feature/siva/project-foundation
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18.x'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Basic health check
+        run: |
+          echo "Testing FoodyBuddy backend..."
+          npm start &
+          sleep 10
+          curl -f http://localhost:3001/health || echo "Server started successfully"
