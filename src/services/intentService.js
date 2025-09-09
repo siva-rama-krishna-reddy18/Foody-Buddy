@@ -10,29 +10,51 @@ async function classifyIntent(message) {
       return 'GREETING';
     }
     
-    // Order status patterns
-    if (/\b(order|orders|recent|history|status|tracking)\b/.test(lowerMessage)) {
+    // Payment/Checkout patterns (check before other patterns)
+    if (/\b(checkout|pay|payment|proceed.*pay|place.*order|complete.*order|pay.*now|make.*payment)\b/.test(lowerMessage)) {
+      return 'CHECKOUT';
+    }
+    
+    // Cart quantity update patterns (ADD THESE BEFORE OTHER PATTERNS)
+    if (/\b(increase|decrease).*quantity/.test(lowerMessage)) {
+      return 'UPDATE_CART_QUANTITY';
+    }
+
+    if (/\bremove.*from.*cart/.test(lowerMessage)) {
+      return 'REMOVE_FROM_CART';
+    }
+    
+    // Order tracking by ID patterns (check this before general order status)
+    if (/\b(track|tracking|check|status|where.*is)\b.*\b(order|#)\s*\d+\b/.test(lowerMessage) ||
+        /\border\s*\d+\b/.test(lowerMessage) ||
+        /\b\d{3,}\b.*\b(order|status|track)\b/.test(lowerMessage)) {
+      return 'TRACK_ORDER';
+    }
+    
+    // Order status patterns (general history)
+    if (/\b(order|orders|recent|history|status)\b/.test(lowerMessage) &&
+        !/\b\d{3,}\b/.test(lowerMessage)) {
       return 'ORDER_STATUS';
     }
     
-    // Recommendation patterns  
-    if (/\b(recommend|suggestion|suggest|what.*good|popular|best)\b/.test(lowerMessage)) {
-      return 'RECOMMEND';
-    }
-    
-    // Search patterns
-    if (/\b(do you have|find|search|looking for|menu|available)\b/.test(lowerMessage)) {
-      return 'SEARCH';
-    }
-    
-    // Add to cart patterns
-    if (/\b(add.*cart|want.*order|I.*like|get me)\b/.test(lowerMessage)) {
+    // Add to cart patterns (VERY SPECIFIC)
+    if (/\b(add\s+.+\s+to\s+cart|add\s+.+\s+cart|put\s+.+\s+in\s+cart)\b/.test(lowerMessage)) {
       return 'ADD_TO_CART';
     }
     
-    // View cart patterns
-    if (/\b(cart|basket|my order|show.*cart|view.*cart)\b/.test(lowerMessage)) {
+    // View cart patterns (VERY SPECIFIC)
+    if (/^(show\s+my\s+cart|view\s+cart|see\s+cart|cart|my\s+cart)$/i.test(lowerMessage)) {
       return 'VIEW_CART';
+    }
+    
+    // Explicit search patterns (VERY SPECIFIC)
+    if (/^(search\s+for|find\s+me|do\s+you\s+have|show\s+me\s+menu|view\s+menu|menu)/.test(lowerMessage)) {
+      return 'SEARCH';
+    }
+    
+    // Explicit recommendation requests (VERY SPECIFIC)
+    if (/^(recommend|what\s+do\s+you\s+recommend|suggest\s+something|what.*popular|what.*good)/.test(lowerMessage)) {
+      return 'RECOMMEND';
     }
     
     // Preference learning patterns
@@ -40,8 +62,28 @@ async function classifyIntent(message) {
       return 'LEARN_PREFERENCE';
     }
     
-    // Default to search for unknown queries
-    return 'SEARCH';
+    // CONVERSATIONAL QUERIES - Let these go to AI
+    // Hunger expressions
+    if (/\b(hungry|starving|famished|want.*eat|need.*food|craving)\b/.test(lowerMessage)) {
+      return 'UNKNOWN';
+    }
+    
+    // Question words that indicate conversation
+    if (/^(what|how|why|when|where|which|can\s+you|could\s+you|would\s+you|tell\s+me|explain)/.test(lowerMessage)) {
+      return 'UNKNOWN';
+    }
+    // In intentService.js, add this to your intent patterns:
+if (lowerText.includes('reorder') && /\b\d{3,}\b/.test(text)) {
+  return 'REORDER';
+}
+    
+    // Natural conversation starters
+    if (/\b(help|assist|advice|suggestion|opinion|think|feel|good\s+for|best\s+for)\b/.test(lowerMessage)) {
+      return 'UNKNOWN';
+    }
+    
+    // Default to UNKNOWN for conversational AI
+    return 'UNKNOWN';
     
   } catch (error) {
     console.error('[Intent] Classification error:', error);
@@ -53,10 +95,18 @@ function extractEntities(message) {
   const entities = {
     foods: [],
     quantities: [],
-    preferences: []
+    preferences: [],
+    orderId: null
   };
   
   const lowerMessage = message.toLowerCase();
+  
+  // Extract order ID
+  const orderIdRegex = /\b(\d{3,})\b/;
+  const orderIdMatch = message.match(orderIdRegex);
+  if (orderIdMatch) {
+    entities.orderId = orderIdMatch[1];
+  }
   
   // Common food items
   const foods = ['biryani', 'curry', 'naan', 'samosa', 'rice', 'chicken', 'lamb', 'vegetable'];
@@ -85,7 +135,7 @@ function extractEntities(message) {
 }
 
 if (DEBUG) {
-  console.log('[Intent] Service loaded');
+  console.log('[Intent] Service loaded with cart controls and AI-friendly classification');
 }
 
 module.exports = {

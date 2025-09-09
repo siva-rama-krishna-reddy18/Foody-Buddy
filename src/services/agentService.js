@@ -5,160 +5,516 @@ const prisma = new PrismaClient();
 const { classifyIntent } = require('./intentService');
 const { searchSimilar } = require('./vectorService');
 const { generateEmbedding } = require('./embeddingService');
+const aiResponseService = require('./aiResponseService'); // ADD THIS LINE
 
 const DEBUG = process.env.NODE_ENV === 'development';
 
 class AgentService {
   constructor() {
     this.sessionMemory = new Map();
-    if (DEBUG) console.log('[Agent] Enhanced AgentService initialized');
+    if (DEBUG) console.log('[Agent] Enhanced AgentService initialized with AI and payment support');
   }
 
-  // Add respond() method to match your existing controller
-  async respond({ sessionId, customerId, text }) {
-    try {
-      const result = await this.processMessage(customerId, sessionId, text);
-      
-      // Convert to format your controller expects
+  // Add this to your agentService.js respond method - replace the existing respond method:
+
+async respond({ sessionId, customerId, text }) {
+  try {
+    const result = await this.processMessage(customerId, sessionId, text);
+    
+    // Handle cart response differently
+    if (typeof result.response === 'object' && result.response.cartItems) {
+      console.log(' [Agent] TAKING CART PATH');
       return {
-        aiText: result.response,
+        aiText: result.response,  // Pass the entire cart object
         intent: result.intent,
         productList: result.products || [],
-        addToCart: await this.getCartData(customerId), // Include current cart state
+        addToCart: await this.getCartData(customerId),
+        cartData: result.response, // Also include as cartData
         meta: {
           suggestions: result.suggestions || [],
           timestamp: new Date().toISOString()
         }
       };
-    } catch (error) {
-      console.error('[Agent] Respond method error:', error);
+    }
+
+    // Handle order tracking response
+    if (typeof result.response === 'object' && result.response.orders) {
+      console.log(' [Agent] TAKING ORDER TRACKING PATH');
       return {
-        aiText: "Sorry, I'm having technical difficulties. Please try again.",
-        intent: 'ERROR',
-        productList: [],
-        addToCart: null,
-        meta: { error: error.message }
+        aiText: '', // Empty text since we show interactive component
+        intent: result.intent,
+        productList: result.products || [],
+        addToCart: await this.getCartData(customerId),
+        orderData: result.response, // Pass order data
+        meta: {
+          suggestions: result.suggestions || [],
+          timestamp: new Date().toISOString()
+        }
       };
     }
-  }
-
-  // Helper method to get current cart data from database
-  async getCartData(customerId) {
-    try {
-      // First, find a cart for this customer using correct field name
-      let cart = await prisma.carts.findFirst({
-        where: { customer_id: customerId }  // Use customer_id, not customerId
-      });
-
-      if (!cart) {
-        // No cart exists, so no items
-        return null;
-      }
-
-      // Now get cart items using the cart_id
-      const cartItems = await prisma.cartItem.findMany({
-        where: { cart_id: cart.id },
-        include: { products: true }
-      });
-      
-      if (cartItems.length === 0) return null;
-      
-      const total = cartItems.reduce((sum, item) => {
-        return sum + (parseFloat(item.unit_price || item.products?.price || 0) * item.quantity);
-      }, 0);
-      
+    
+    // Handle payment response
+    if (typeof result.response === 'object' && result.response.payment) {
+      console.log(' [Agent] TAKING PAYMENT PATH');
       return {
-        items: cartItems.map(item => ({
-          id: item.id,
-          productId: item.productId,
-          name: item.title || item.products?.name,
-          price: parseFloat(item.unit_price || item.products?.price || 0),
-          quantity: item.quantity,
-          total: parseFloat(item.unit_price || item.products?.price || 0) * item.quantity
-        })),
-        total: parseFloat(total.toFixed(2)),
-        itemCount: cartItems.reduce((sum, item) => sum + item.quantity, 0)
+        aiText: result.response.text,
+        intent: result.intent,
+        productList: result.products || [],
+        addToCart: await this.getCartData(customerId),
+        payment: result.response.payment,
+        meta: {
+          suggestions: result.suggestions || [],
+          timestamp: new Date().toISOString()
+        }
       };
+    }
+    
+    console.log(' [Agent] TAKING NORMAL PATH');
+    return {
+      aiText: result.response,
+      intent: result.intent,
+      productList: result.products || [],
+      addToCart: await this.getCartData(customerId),
+      cartData: result.cartData,
+      meta: {
+        suggestions: result.suggestions || [],
+        timestamp: new Date().toISOString()
+      }
+    };
+  } catch (error) {
+    console.error('[Agent] Error in respond:', error);
+    return {
+      aiText: "I'm having some technical difficulties. Please try again in a moment.",
+      intent: 'ERROR',
+      productList: [],
+      addToCart: null,
+      cartData: null,
+      orderData: null,
+      meta: {
+        suggestions: ['Try again', 'View Menu'],
+        timestamp: new Date().toISOString()
+      }
+    };
+  }
+}
+
+
+// Replace your existing handleOrderStatus method with this enhanced version:
+// Replace your handleOrderStatus method in agentService.js with this:
+
+async handleOrderStatus(customerId) {
+  try {
+    console.log('[Agent] Checking orders for customer:', customerId);
+    let orders = [];
+    
+    try {
+      orders = await prisma.order.findMany({
+        where: { customerId: customerId },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        include: {
+          orderLineItems: {
+            take: 3
+          }
+        }
+      });
     } catch (error) {
-      console.error('[Agent] Cart data error:', error);
+      console.log('[Agent] Order lookup failed:', error.message);
+    }
+
+    if (orders.length === 0) {
+      return "You don't have any recent orders. Would you like to place a new order? I can show you our popular items or help you search for something specific!";
+    }
+
+    // IMPORTANT: Return structured data object, not text
+    const orderData = orders.map(order => ({
+      id: order.id,
+      orderNumber: order.orderNumber || 'N/A',
+      status: this.mapOrderStatus(order.status || 'delivered'),
+      date: new Date(order.createdAt || order.created_at).toLocaleDateString(),
+      total: parseFloat(order.amount || order.total_amount || 0),
+      estimatedDelivery: this.getEstimatedDelivery(order.status),
+      items: (order.orderLineItems || []).map(item => ({
+        name: item.productName || 'Item',
+        quantity: item.quantity || 1,
+        price: parseFloat(item.price || 0)
+      }))
+    }));
+
+    // Return the structured object that triggers interactive component
+    return {
+      type: 'order_tracking',
+      orders: orderData
+    };
+
+  } catch (error) {
+    console.error('[Agent] Order status error:', error);
+    return "I'm having trouble accessing your order history right now. Would you like to place a new order instead?";
+  }
+}
+
+// Add these helper methods to your AgentService class:
+mapOrderStatus(status) {
+  const statusMap = {
+    'PENDING': 'preparing',
+    'CONFIRMED': 'preparing', 
+    'PREPARING': 'preparing',
+    'READY': 'ready',
+    'OUT_FOR_DELIVERY': 'out_for_delivery',
+    'DELIVERED': 'delivered',
+    'CANCELLED': 'cancelled'
+  };
+  
+  return statusMap[status?.toUpperCase()] || 'delivered';
+}
+
+getEstimatedDelivery(status) {
+  const now = new Date();
+  
+  switch (status?.toUpperCase()) {
+    case 'PENDING':
+    case 'CONFIRMED':
+      const prepTime = new Date(now.getTime() + 30 * 60000); // 30 minutes
+      return prepTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    case 'PREPARING':
+      const cookTime = new Date(now.getTime() + 20 * 60000); // 20 minutes
+      return cookTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    case 'OUT_FOR_DELIVERY':
+      const deliveryTime = new Date(now.getTime() + 15 * 60000); // 15 minutes
+      return deliveryTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    default:
+      return null;
+  }
+}
+
+async processMessage(customerId, sessionId, message) {
+  try {
+    if (DEBUG) console.log(`[Agent] Processing: "${message}" for customer: ${customerId}`);
+
+    await this.logInteraction(customerId, sessionId, message);
+
+    const intent = await classifyIntent(message);
+    if (DEBUG) console.log(`[Agent] Intent: ${intent}`);
+
+    let response;
+    let products = [];
+    let suggestions = [];
+    let cartData = null; // Add this variable
+
+    // Handle different intents
+    switch (intent) {
+      case 'GREETING':
+        response = await this.handleGreeting(customerId);
+        suggestions = ['View Menu', 'Show my cart', 'Track Orders'];
+        break;
+
+      case 'ORDER_STATUS':
+        response = await this.handleOrderStatus(customerId);
+        suggestions = ['Show recommendations', 'View menu'];
+        break;
+        
+      case 'TRACK_ORDER':
+        response = await this.handleOrderTracking(message);
+        suggestions = ['View menu', 'Show recommendations'];
+        break;
+
+      case 'RECOMMEND':
+        ({ response, products } = await this.handleRecommendations(customerId));
+        suggestions = ['Add to cart', 'Show my cart'];
+        break;
+
+      case 'SEARCH':
+        ({ response, products } = await this.handleSearch(message));
+        suggestions = ['Add to cart', 'Show recommendations'];
+        break;
+
+      case 'ADD_TO_CART':
+        response = await this.handleAddToCart(customerId, sessionId, message);
+        suggestions = ['Show my cart', 'Proceed to pay', 'Continue shopping'];
+        break;
+
+      case 'VIEW_CART':
+        const cartResult = await this.handleViewCart(customerId);
+        
+        // Check if cart result is an object with cart data
+        if (typeof cartResult === 'object' && cartResult.cartItems) {
+          response = cartResult.text;
+          cartData = {
+            type: 'cart_display',
+            cartItems: cartResult.cartItems,
+            cartTotal: cartResult.cartTotal
+          };
+        } else {
+          response = cartResult; // String response for empty cart
+        }
+        
+        suggestions = ['Proceed to pay', 'Add more items', 'Clear cart'];
+        break;
+
+      case 'CHECKOUT':
+        response = await this.handleCheckout(customerId);
+        break;
+
+      case 'UPDATE_CART_QUANTITY':
+        if (message.includes('increase')) {
+          const productId = message.match(/increase quantity of (.+)/)?.[1];
+          response = await this.handleUpdateCartQuantity(customerId, productId, 'increase');
+        } else if (message.includes('decrease')) {
+          const productId = message.match(/decrease quantity of (.+)/)?.[1];
+          response = await this.handleUpdateCartQuantity(customerId, productId, 'decrease');
+        }
+        suggestions = ['Show my cart', 'Proceed to pay'];
+        break;
+
+      case 'REMOVE_FROM_CART':
+        const productId = message.match(/remove (.+) from cart/)?.[1];
+        response = await this.handleRemoveFromCart(customerId, productId);
+        suggestions = ['Show my cart', 'Add more items'];
+        break;
+
+      case 'REORDER':
+  response = await this.handleReorder(customerId, message);
+  suggestions = ['Show my cart', 'Proceed to pay', 'Add more items'];
+  break;
+
+      case 'LEARN_PREFERENCE':
+        response = await this.handlePreferenceLearning(customerId, message);
+        suggestions = ['Show recommendations', 'View menu'];
+        break;
+
+      // In agentService.js processMessage method, modify the UNKNOWN case:
+case 'UNKNOWN':
+default:
+  // Check if this is a reorder request
+  if (message.toLowerCase().includes('reorder') && /\b\d{3,}\b/.test(message)) {
+    response = await this.handleReorder(customerId, message);
+    suggestions = ['Show my cart', 'Proceed to pay', 'Add more items'];
+  } else {
+    console.log('[Agent] Using AI for conversational response');
+    const conversationalResult = await this.handleConversationalQuery(message, sessionId, customerId, intent);
+    
+    if (typeof conversationalResult === 'object' && conversationalResult.products) {
+      response = conversationalResult.response;
+      products = conversationalResult.products;
+      suggestions = ['Add to cart', 'Show more options', 'Show my cart'];
+    } else {
+      response = conversationalResult;
+      suggestions = ['View Menu', 'Show my cart', 'Track Orders'];
+    }
+  }
+  break;
+}
+
+    await this.logInteraction(customerId, sessionId, message, intent, null, response, products);
+
+    return {
+      intent,
+      response,
+      products,
+      suggestions,
+      cartData // Include cartData in the return
+    };
+
+  } catch (error) {
+    console.error('[Agent] Error:', error);
+    return {
+      intent: 'ERROR',
+      response: "I'm having some technical difficulties. Please try again in a moment.",
+      products: [],
+      suggestions: ['Try again', 'View Menu']
+    };
+  }
+}
+async getCartData(customerId) {
+  try {
+    let cart = await prisma.carts.findFirst({
+      where: { customer_id: customerId }
+    });
+
+    if (!cart) {
       return null;
     }
+
+    const cartItems = await prisma.cartItem.findMany({
+      where: { cart_id: cart.id },
+      include: { products: true }
+    });
+    
+    if (cartItems.length === 0) return null;
+    
+    const total = cartItems.reduce((sum, item) => {
+      return sum + (parseFloat(item.unit_price || item.products?.price || 0) * item.quantity);
+    }, 0);
+    
+    return {
+      items: cartItems.map(item => ({
+        id: item.id,
+        productId: item.productId,
+        name: item.title || item.products?.name,
+        price: parseFloat(item.unit_price || item.products?.price || 0),
+        quantity: item.quantity,
+        total: parseFloat(item.unit_price || item.products?.price || 0) * item.quantity
+      })),
+      total: parseFloat(total.toFixed(2)),
+      itemCount: cartItems.reduce((sum, item) => sum + item.quantity, 0)
+    };
+  } catch (error) {
+    console.error('[Agent] Cart data error:', error);
+    return null;
   }
+}
 
-  async processMessage(customerId, sessionId, message) {
+  // NEW: Handle conversational queries using AI
+// In agentService.js - Update the handleConversationalQuery method
+async handleConversationalQuery(message, sessionId, customerId, intent) {
+  try {
+    // Get cart context for AI
+    const cartData = await this.getCartData(customerId);
+    let context = ['FoodyBuddy Indian restaurant', 'Specializing in authentic Indian cuisine'];
+    
+    if (cartData && cartData.items.length > 0) {
+      context.push(`Customer has ${cartData.itemCount} items in cart (total: $${cartData.total})`);
+      context.push(`Cart items: ${cartData.items.map(item => item.name).join(', ')}`);
+    }
+
+    // Try AI service first
+    const aiResponse = await aiResponseService.getAIResponse(message, sessionId, {
+      intent: intent,
+      context: context
+    });
+
+    // IMPROVED VALIDATION: Check if AI response addresses the user's query
+    const lowerMessage = message.toLowerCase();
+    const lowerResponse = aiResponse ? aiResponse.toLowerCase() : '';
+    
+    // If user asks for specific items, AI should mention them or similar items
+    const isProductQuery = lowerMessage.includes('paneer') || lowerMessage.includes('chicken') || 
+                          lowerMessage.includes('biryani') || lowerMessage.includes('curry') ||
+                          lowerMessage.includes('tea') || lowerMessage.includes('rice') ||
+                          lowerMessage.includes('naan') || lowerMessage.includes('samosa');
+    
+    if (aiResponse && 
+        aiResponse.trim().length > 0 && 
+        !aiResponse.includes('Here are some FoodyBuddy picks to get started')) {
+      
+      // If it's a product query, check if AI actually addressed it
+      if (isProductQuery) {
+        // Check if AI response mentions the requested item or similar items
+        const mentionsRequestedItem = lowerMessage.split(' ').some(word => 
+          word.length > 3 && lowerResponse.includes(word)
+        );
+        
+        if (!mentionsRequestedItem) {
+          console.log('[Agent] AI response doesn\'t address product query, falling back to vector search');
+          throw new Error('AI response doesn\'t address specific product request');
+        }
+      }
+      
+      console.log('[Agent] AI response successful');
+      return aiResponse;
+    } else {
+      console.log('[Agent] AI response invalid, falling back to vector search');
+      throw new Error('AI response invalid or empty');
+    }
+
+  } catch (error) {
+    console.error('[Agent] AI failed, using vector search fallback:', error.message);
+    
+    // FALLBACK: Use vector search for product recommendations
     try {
-      if (DEBUG) console.log(`[Agent] Processing: "${message}" for customer: ${customerId}`);
-
-      // Log interaction (with proper error handling)
-      await this.logInteraction(customerId, sessionId, message);
-
-      // Classify intent
-      const intent = await classifyIntent(message);
-      if (DEBUG) console.log(`[Agent] Intent: ${intent}`);
-
-      let response;
-      let products = [];
-      let suggestions = [];
-
-      // Handle different intents
-      switch (intent) {
-        case 'GREETING':
-          response = await this.handleGreeting(customerId);
-          break;
-
-        case 'ORDER_STATUS':
-          response = await this.handleOrderStatus(customerId);
-          suggestions = ['Show recommendations', 'View menu'];
-          break;
-
-        case 'RECOMMEND':
-          ({ response, products } = await this.handleRecommendations(customerId));
-          break;
-
-        case 'SEARCH':
-          ({ response, products } = await this.handleSearch(message));
-          break;
-
-        case 'ADD_TO_CART':
-          response = await this.handleAddToCart(customerId, sessionId, message);
-          break;
-
-        case 'VIEW_CART':
-          response = await this.handleViewCart(customerId);
-          break;
-
-        case 'LEARN_PREFERENCE':
-          response = await this.handlePreferenceLearning(customerId, message);
-          break;
-
-        default:
-          response = "I'm here to help you with orders, recommendations, and questions about our food. What would you like to know?";
+      const vectorResults = await this.searchProducts(message);
+      
+      if (vectorResults && vectorResults.length > 0) {
+        console.log('[Agent] Vector search fallback successful');
+        
+        // Create a natural response with vector results
+        const productList = vectorResults.slice(0, 3).map(product => 
+          `• ${product.name} - $${product.price}`
+        ).join('\n');
+        
+        return {
+          response: `I found these items that might interest you:`,
+          products: vectorResults
+        };
+      }
+    } catch (vectorError) {
+      console.error('[Agent] Vector search fallback also failed:', vectorError.message);
+    }
+    
+    // If both AI and vector search fail
+    return "I'm having trouble understanding that request. Could you try asking me to search for specific items or view our menu?";
+  }
+}
+  // Handle checkout/payment
+  async handleCheckout(customerId) {
+    try {
+      const cartData = await this.getCartData(customerId);
+      
+      if (!cartData || cartData.items.length === 0) {
+        return "Your cart is empty! Add some items to your cart first, then I can help you checkout.";
       }
 
-      // Log the response
-      await this.logInteraction(customerId, sessionId, message, intent, null, response, products);
+      return {
+        text: "Perfect! Let's process your payment for your order.",
+        payment: {
+          total: cartData.total,
+          items: cartData.items.map(item => ({
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price
+          }))
+        }
+      };
+    } catch (error) {
+      console.error('[Agent] Checkout error:', error);
+      return "I'm having trouble accessing your cart for checkout. Please try again.";
+    }
+  }
+
+  async handlePaymentSuccess(customerId, paymentData) {
+    try {
+      const cart = await prisma.carts.findFirst({
+        where: { customer_id: customerId }
+      });
+
+      if (cart) {
+        await prisma.cartItem.deleteMany({
+          where: { cart_id: cart.id }
+        });
+      }
+
+      const orderNumber = Math.floor(100000 + Math.random() * 900000);
+      
+      try {
+        await prisma.order.create({
+          data: {
+            orderNumber: orderNumber,
+            customerId: customerId,
+            amount: paymentData.total,
+            status: 'CONFIRMED',
+            createdAt: new Date(),
+          }
+        });
+      } catch (orderError) {
+        console.log('[Agent] Order creation failed:', orderError.message);
+      }
 
       return {
-        intent,
-        response,
-        products,
-        suggestions
+        text: `Payment successful! Your order #${orderNumber} has been confirmed and is being prepared. You'll receive updates on your order status. Thank you for choosing FoodyBuddy!`,
+        suggestions: ['Track Orders', 'View Menu', 'Reorder']
       };
 
     } catch (error) {
-      console.error('[Agent] Error:', error);
+      console.error('[Agent] Payment success handling error:', error);
       return {
-        intent: 'ERROR',
-        response: "I'm having some technical difficulties. Please try again in a moment.",
-        products: [],
-        suggestions: []
+        text: "Payment was successful! Your order is being prepared. Thank you for your order!",
+        suggestions: ['Track Orders', 'View Menu']
       };
     }
   }
 
   async handleGreeting(customerId) {
     try {
-      // Get customer info - check both possible field names
       let customer = null;
       try {
         customer = await prisma.customer.findUnique({
@@ -175,7 +531,6 @@ class AgentService {
       }
 
       if (customer) {
-        // Get recent orders - try different field combinations
         let recentOrders = [];
         try {
           recentOrders = await prisma.order.findMany({
@@ -238,58 +593,196 @@ class AgentService {
     }
   }
 
-  async handleOrderStatus(customerId) {
-  try {
-    console.log('[Agent] Checking orders for customer:', customerId);
-    let orders = [];
-    
+
+  async handleOrderTracking(message) {
     try {
-      orders = await prisma.order.findMany({
-        where: { customerId: customerId },
-        orderBy: { createdAt: 'desc' },
-        take: 5,
-        include: {
-          orderLineItems: {
-            take: 3
-          }
-        }
-      });
-    } catch (error) {
-      console.log('[Agent] Order lookup failed:', error.message);
-    }
-
-    if (orders.length === 0) {
-      return "You don't have any recent orders. Would you like to place a new order? I can show you our popular items or help you search for something specific!";
-    }
-
-    const orderList = orders.map(order => {
-      let items = 'Order items';
-      let status = order.status || 'Completed';
+      // Extract order ID from message
+      const orderIdMatch = message.match(/\b(\d{3,})\b/);
       
-      // Calculate total amount
-      let total = '0';
-      if (order.amount && order.amount > 0) {
-        total = order.amount;
-      } else if (order.total_amount && order.total_amount > 0) {
-        total = order.total_amount;
-      } else if (order.orderLineItems && order.orderLineItems.length > 0) {
-        const calculatedTotal = order.orderLineItems.reduce((sum, item) => {
-          return sum + (parseFloat(item.price || 0) * item.quantity);
-        }, 0);
-        total = calculatedTotal > 0 ? calculatedTotal.toFixed(2) : '0';
+      if (!orderIdMatch) {
+        return "Please provide your order ID. For example: 'Track order 12345' or just enter the order number.";
       }
       
-      const date = new Date(order.createdAt || order.created_at).toLocaleDateString();
+      const orderId = orderIdMatch[1];
       
-      return `${status} (${date}) - $${total}`;
-    }).join('\n'); // Change this from space to \n for line breaks
+      // Search for order by order number
+      let order = null;
+      
+      try {
+        // Search for order by order number only
+        order = await prisma.order.findFirst({
+          where: {
+            orderNumber: parseInt(orderId)
+          },
+          include: {
+            orderLineItems: true  // Remove the product include since relation doesn't exist
+          }
+        });
+        
+        // If we found the order but product names are missing, fetch them manually
+        if (order && order.orderLineItems) {
+          for (let item of order.orderLineItems) {
+            if (!item.productName && item.productId) {
+              try {
+                const product = await prisma.product.findUnique({
+                  where: { id: item.productId }
+                });
+                if (product) {
+                  item.productName = product.name; // Add the product name to the item
+                }
+              } catch (productError) {
+                console.log('[Agent] Could not fetch product for item:', item.productId);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[Agent] Order lookup error:', error);
+      }
+      
+      if (!order) {
+        return `I couldn't find an order with ID "${orderId}". Please check your order number and try again. You can find your order ID in your confirmation email or receipt.`;
+      }
+      
+      // Format order status response
+      const orderNumber = order.orderNumber || order.order_number || order.id;
+      const status = order.status || 'Processing';
+      const createdDate = new Date(order.createdAt || order.created_at).toLocaleDateString();
+      const amount = order.amount || order.total_amount || '0';
+      
+      // Calculate estimated delivery time based on status
+      let statusMessage = '';
+      let estimatedTime = '';
+      
+      switch (status.toUpperCase()) {
+        case 'PENDING':
+        case 'CONFIRMED':
+          statusMessage = 'Order confirmed and being prepared';
+          estimatedTime = '25-35 minutes';
+          break;
+        case 'PREPARING':
+          statusMessage = 'Your order is being prepared in our kitchen';
+          estimatedTime = '15-25 minutes';
+          break;
+        case 'OUT_FOR_DELIVERY':
+          statusMessage = 'Order is out for delivery';
+          estimatedTime = '10-15 minutes';
+          break;
+        case 'DELIVERED':
+          statusMessage = 'Order has been delivered';
+          estimatedTime = 'Completed';
+          break;
+        case 'CANCELLED':
+          statusMessage = 'Order was cancelled';
+          estimatedTime = 'N/A';
+          break;
+        default:
+          statusMessage = `Order status: ${status}`;
+          estimatedTime = 'Please contact support for details';
+      }
+      
+      // Build order items list with debugging
+      let itemsList = '';
+      if (order.orderLineItems && order.orderLineItems.length > 0) {
+        if (DEBUG) {
+          console.log('[Agent] Order items debug:', JSON.stringify(order.orderLineItems, null, 2));
+        }
+        
+        itemsList = '\n\nItems:\n' + order.orderLineItems.map(item => {
+          const productName = item.productName || `Product ID: ${item.productId}` || 'Unknown Item';
+          const quantity = item.quantity || 1;
+          const price = item.price || 0;
+          
+          return `• ${productName} x${quantity} - $${parseFloat(price).toFixed(2)}`;
+        }).join('\n');
+      }
+      
+      const response = `Order #${orderNumber} Status:
 
-    return `Here are your recent orders:\n\n${orderList}\n\nWould you like to reorder any of these items or place a new order?`;
+${statusMessage}
+Amount: $${amount}
+Order Date: ${createdDate}
+${estimatedTime !== 'N/A' && estimatedTime !== 'Completed' ? `Estimated Time: ${estimatedTime}` : ''}${itemsList}
+
+${status.toUpperCase() === 'DELIVERED' ? 'Thank you for your order!' : 'We\'ll notify you of any updates!'}`;
+      
+      return response;
+      
+    } catch (error) {
+      console.error('[Agent] Order tracking error:', error);
+      return "I'm having trouble accessing order information right now. Please try again or contact our support team.";
+    }
+  }
+
+  async handleReorder(customerId, message) {
+  try {
+    // Extract order number from message
+    const orderMatch = message.match(/\b(\d{3,})\b/);
+    
+    if (!orderMatch) {
+      return "Please specify which order you'd like to reorder. For example: 'Reorder 403097'";
+    }
+    
+    const orderNumber = orderMatch[1];
+    
+    // Find the order
+    const order = await prisma.order.findFirst({
+      where: { orderNumber: parseInt(orderNumber) },
+      include: { orderLineItems: true }
+    });
+
+    console.log(`[Agent] Found order:`, order);
+    console.log(`[Agent] Order items:`, order?.orderLineItems);
+    
+    if (!order || !order.orderLineItems || order.orderLineItems.length === 0) {
+      return `I couldn't find order #${orderNumber} or it has no items to reorder.`;
+    }
+    
+    // Add items back to cart
+    let cart = await prisma.carts.findFirst({
+      where: { customer_id: customerId }
+    });
+    
+    if (!cart) {
+      cart = await prisma.carts.create({
+        data: {
+          id: uuidv4(),
+          customer_id: customerId,
+          created_at: new Date(),
+          updated_at: new Date()
+        }
+      });
+    }
+    
+    let addedItems = [];
+    for (const item of order.orderLineItems) {
+      try {
+        await prisma.cartItem.create({
+          data: {
+            id: uuidv4(),
+            cart_id: cart.id,
+            productId: item.productId,
+            title: item.productName,
+            unit_price: parseFloat(item.price),
+            quantity: item.quantity,
+            created_at: new Date(),
+            updated_at: new Date()
+          }
+        });
+        addedItems.push(item.productName);
+      } catch (error) {
+        console.log(`[Agent] Could not add ${item.productName} to cart:`, error.message);
+      }
+    }
+    
+    return `Great! I've added ${addedItems.length} items from order #${orderNumber} to your cart: ${addedItems.join(', ')}. Use "show my cart" to review your items.`;
+    
   } catch (error) {
-    console.error('[Agent] Order status error:', error);
-    return "I'm having trouble accessing your order history right now. Would you like to place a new order instead?";
+    console.error('[Agent] Reorder error:', error);
+    return "I'm having trouble processing that reorder. Please try again or add items manually.";
   }
 }
+
   async handleRecommendations(customerId) {
     try {
       // Get personalized recommendations based on order history
@@ -539,8 +1032,7 @@ class AgentService {
       const products = await this.searchProducts(message);
       
       if (products.length > 0) {
-        const response = `I found these items for "${message}":\n\n` + 
-          products.map(item => `• ${item.name} - $${item.price}${item.description ? '\n  ' + item.description : ''}`).join('\n');
+        const response = `I found these items for "${message}":` 
         
         return { response, products };
       } else {
@@ -558,71 +1050,70 @@ class AgentService {
     }
   }
 
-  // In your agentService.js, find the searchProducts method and update it:
-async searchProducts(query) {
-  try {
-    // Try vector search first
-    const vectorResults = await searchSimilar(query, 5, 'product');
-    if (vectorResults && vectorResults.length > 0) {
-      return vectorResults;
+  async searchProducts(query) {
+    try {
+      // Try vector search first
+      const vectorResults = await searchSimilar(query, 5, 'product');
+      if (vectorResults && vectorResults.length > 0) {
+        return vectorResults;
+      }
+    } catch (error) {
+      if (DEBUG) console.log('[Agent] Vector search failed, using text search');
     }
-  } catch (error) {
-    if (DEBUG) console.log('[Agent] Vector search failed, using text search');
-  }
 
-  // Enhanced fallback to text search
-  try {
-    const textResults = await prisma.product.findMany({
-      where: {
-        AND: [
-          { is_available: true },
-          {
-            OR: [
-              { name: { contains: query, mode: 'insensitive' } },
-              { description: { contains: query, mode: 'insensitive' } },
-              { category: { contains: query, mode: 'insensitive' } }
-            ]
-          }
-        ]
-      },
-      take: 5
-    });
-
-    // If no results, try broader search
-    if (textResults.length === 0) {
-      const broaderResults = await prisma.product.findMany({
+    // Enhanced fallback to text search
+    try {
+      const textResults = await prisma.product.findMany({
         where: {
-          is_available: true
+          AND: [
+            { is_available: true },
+            {
+              OR: [
+                { name: { contains: query, mode: 'insensitive' } },
+                { description: { contains: query, mode: 'insensitive' } },
+                { category: { contains: query, mode: 'insensitive' } }
+              ]
+            }
+          ]
         },
         take: 5
       });
-      
-      return broaderResults.map(p => ({
+
+      // If no results, try broader search
+      if (textResults.length === 0) {
+        const broaderResults = await prisma.product.findMany({
+          where: {
+            is_available: true
+          },
+          take: 5
+        });
+        
+        return broaderResults.map(p => ({
+          id: p.id,
+          name: p.name,
+          price: p.price,
+          description: p.description,
+          category: p.category
+        }));
+      }
+
+      return textResults.map(p => ({
         id: p.id,
         name: p.name,
         price: p.price,
         description: p.description,
         category: p.category
       }));
+    } catch (error) {
+      console.error('[Agent] Text search error:', error);
+      // Return some hardcoded products as absolute fallback
+      return [
+        { id: 'biryani-1', name: 'Chicken Biryani', price: 12.99, description: 'Aromatic rice with spiced chicken' },
+        { id: 'curry-1', name: 'Butter Chicken', price: 11.99, description: 'Creamy tomato-based curry' },
+        { id: 'samosa-1', name: 'Vegetable Samosa (2pcs)', price: 4.99, description: 'Crispy pastry with spiced vegetables' }
+      ];
     }
-
-    return textResults.map(p => ({
-      id: p.id,
-      name: p.name,
-      price: p.price,
-      description: p.description,
-      category: p.category
-    }));
-  } catch (error) {
-    console.error('[Agent] Text search error:', error);
-    // Return some hardcoded products as absolute fallback
-    return [
-      { id: 'biryani-1', name: 'Chicken Biryani', price: 12.99, description: 'Aromatic rice with spiced chicken' },
-      { id: 'curry-1', name: 'Butter Chicken', price: 11.99, description: 'Creamy tomato-based curry' },
-      { id: 'samosa-1', name: 'Vegetable Samosa (2pcs)', price: 4.99, description: 'Crispy pastry with spiced vegetables' }
-    ];
   }
-}
 
   async handleAddToCart(customerId, sessionId, message) {
     try {
@@ -646,15 +1137,15 @@ async searchProducts(query) {
       try {
         // First, find or create a cart for this customer
         let cart = await prisma.carts.findFirst({
-          where: { customer_id: customerId }  // Use customer_id, not customerId
+          where: { customer_id: customerId }
         });
 
         if (!cart) {
           // Create a new cart for the customer
           cart = await prisma.carts.create({
             data: {
-              id: uuidv4(), // Add required id field
-              customer_id: customerId,  // Use customer_id, not customerId
+              id: uuidv4(),
+              customer_id: customerId,
               created_at: new Date(),
               updated_at: new Date()
             }
@@ -681,12 +1172,12 @@ async searchProducts(query) {
           
           const totalPrice = (parseFloat(existingItem.unit_price || product.price) * updatedItem.quantity).toFixed(2);
           
-          return `I've increased the quantity of "${product.name}" in your cart! You now have ${updatedItem.quantity} items. ($${totalPrice}) Use "show my cart" to view all items.`;
+          return `I've increased the quantity of "${product.name}" in your cart! You now have ${updatedItem.quantity} items. (${totalPrice}) Use "show my cart" to view all items.`;
         } else {
           // Add new item to cart
           const cartItem = await prisma.cartItem.create({
             data: {
-              id: uuidv4(), // Add required id field
+              id: uuidv4(),
               cart_id: cart.id,
               productId: product.id,
               title: product.name,
@@ -697,7 +1188,7 @@ async searchProducts(query) {
             }
           });
 
-          return `I've added "${product.name}" to your cart! ($${product.price}) Use "show my cart" to view all items.`;
+          return `I've added "${product.name}" to your cart! (${product.price}) Use "show my cart" to view all items.`;
         }
       } catch (dbError) {
         console.log('[Agent] Database cart failed, using memory:', dbError.message);
@@ -713,7 +1204,7 @@ async searchProducts(query) {
         if (existingItemIndex >= 0) {
           sessionData.cart[existingItemIndex].quantity += 1;
           const quantity = sessionData.cart[existingItemIndex].quantity;
-          return `I've increased the quantity of "${product.name}" in your cart! You now have ${quantity} items. ($${(parseFloat(product.price) * quantity).toFixed(2)}) (Note: Using temporary cart)`;
+          return `I've increased the quantity of "${product.name}" in your cart! You now have ${quantity} items. (${(parseFloat(product.price) * quantity).toFixed(2)}) (Note: Using temporary cart)`;
         } else {
           sessionData.cart.push({
             productId: product.id,
@@ -722,7 +1213,7 @@ async searchProducts(query) {
             quantity: 1,
             addedAt: new Date()
           });
-          return `I've added "${product.name}" to your cart! ($${product.price}) (Note: Using temporary cart)`;
+          return `I've added "${product.name}" to your cart! (${product.price}) (Note: Using temporary cart)`;
         }
       }
 
@@ -732,59 +1223,154 @@ async searchProducts(query) {
     }
   }
 
-  async handleViewCart(customerId) {
-    try {
-      // Find the cart for this customer
-      const cart = await prisma.carts.findFirst({
-        where: { customer_id: customerId }  // Use customer_id, not customerId
-      });
+  // In agentService.js - Replace the handleViewCart method
+// In agentService.js - Make sure your handleViewCart returns an object:
+async handleViewCart(customerId) {
+  try {
+    const cart = await prisma.carts.findFirst({
+      where: { customer_id: customerId }
+    });
 
-      if (!cart) {
-        return "Your cart is empty. Would you like to see our menu or get some recommendations? I can help you find something delicious!";
-      }
-
-      // Get cart items using cart_id
-      const cartItems = await prisma.cartItem.findMany({
-        where: { cart_id: cart.id },
-        include: { products: true }
-      });
-
-      if (cartItems.length === 0) {
-        return "Your cart is empty. Would you like to see our menu or get some recommendations? I can help you find something delicious!";
-      }
-
-      const total = cartItems.reduce((sum, item) => {
-        return sum + (parseFloat(item.unit_price || 0) * item.quantity);
-      }, 0);
-
-      const itemList = cartItems.map(item => 
-        `• ${item.title} x${item.quantity} - $${(parseFloat(item.unit_price || 0) * item.quantity).toFixed(2)}`
-      ).join('\n');
-
-      return `Your Cart:\n\n${itemList}\n\nTotal: $${total.toFixed(2)}\n\nReady to place your order? Just let me know and I'll help you checkout!`;
-
-    } catch (error) {
-      console.error('View cart error:', error);
-      
-      // Fallback to session memory
-      if (this.sessionMemory.has(customerId)) {
-        const sessionData = this.sessionMemory.get(customerId);
-        const cartItems = sessionData.cart || [];
-
-        if (cartItems.length > 0) {
-          const total = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-          const itemList = cartItems.map(item => 
-            `• ${item.name} x${item.quantity} - $${(item.price * item.quantity).toFixed(2)}`
-          ).join('\n');
-
-          return `Your Cart (Temporary):\n\n${itemList}\n\nTotal: $${total.toFixed(2)}\n\nNote: Consider setting up cart database table for persistent storage.`;
-        }
-      }
-
-      return "Your cart is empty. Would you like to see our menu?";
+    if (!cart) {
+      return "Your cart is empty. Would you like to see our menu or get some recommendations?";
     }
-  }
 
+    const cartItems = await prisma.cartItem.findMany({
+      where: { cart_id: cart.id },
+      include: { products: true }
+    });
+
+    if (cartItems.length === 0) {
+      return "Your cart is empty. Would you like to see our menu or get some recommendations?";
+    }
+
+    const total = cartItems.reduce((sum, item) => {
+      return sum + (parseFloat(item.unit_price || 0) * item.quantity);
+    }, 0);
+
+    // IMPORTANT: Return object structure, not just text
+    return {
+      text: `Your Cart:`,
+      type: 'cart_display',
+      cartItems: cartItems.map(item => ({
+        id: item.id,
+        productId: item.productId,
+        name: item.title,
+        price: parseFloat(item.unit_price || 0),
+        quantity: item.quantity,
+        total: parseFloat(item.unit_price || 0) * item.quantity
+      })),
+      cartTotal: parseFloat(total.toFixed(2))
+    };
+
+  } catch (error) {
+    console.error('View cart error:', error);
+    return "Your cart is empty. Would you like to see our menu?";
+  }
+}
+
+// Add new methods for handling quantity changes
+async handleUpdateCartQuantity(customerId, productId, action) {
+  try {
+    // Find the cart for this customer
+    const cart = await prisma.carts.findFirst({
+      where: { customer_id: customerId }
+    });
+
+    if (!cart) {
+      return "Your cart is empty.";
+    }
+
+    // Find the cart item
+    const cartItem = await prisma.cartItem.findFirst({
+      where: {
+        cart_id: cart.id,
+        productId: productId
+      },
+      include: { products: true }
+    });
+
+    if (!cartItem) {
+      return "Item not found in your cart.";
+    }
+
+    if (action === 'increase') {
+      // Increase quantity
+      await prisma.cartItem.update({
+        where: { id: cartItem.id },
+        data: { 
+          quantity: cartItem.quantity + 1,
+          updated_at: new Date()
+        }
+      });
+      
+      const newTotal = (parseFloat(cartItem.unit_price) * (cartItem.quantity + 1)).toFixed(2);
+      return `Increased ${cartItem.title} quantity to ${cartItem.quantity + 1}. Item total: $${newTotal}`;
+      
+    } else if (action === 'decrease') {
+      if (cartItem.quantity > 1) {
+        // Decrease quantity
+        await prisma.cartItem.update({
+          where: { id: cartItem.id },
+          data: { 
+            quantity: cartItem.quantity - 1,
+            updated_at: new Date()
+          }
+        });
+        
+        const newTotal = (parseFloat(cartItem.unit_price) * (cartItem.quantity - 1)).toFixed(2);
+        return `Decreased ${cartItem.title} quantity to ${cartItem.quantity - 1}. Item total: $${newTotal}`;
+        
+      } else {
+        // Remove item if quantity would be 0
+        await prisma.cartItem.delete({
+          where: { id: cartItem.id }
+        });
+        
+        return `Removed ${cartItem.title} from your cart.`;
+      }
+    }
+
+  } catch (error) {
+    console.error('[Agent] Update cart quantity error:', error);
+    return "I'm having trouble updating your cart. Please try again.";
+  }
+}
+
+async handleRemoveFromCart(customerId, productId) {
+  try {
+    // Find the cart for this customer
+    const cart = await prisma.carts.findFirst({
+      where: { customer_id: customerId }
+    });
+
+    if (!cart) {
+      return "Your cart is empty.";
+    }
+
+    // Find and remove the cart item
+    const cartItem = await prisma.cartItem.findFirst({
+      where: {
+        cart_id: cart.id,
+        productId: productId
+      }
+    });
+
+    if (!cartItem) {
+      return "Item not found in your cart.";
+    }
+
+    await prisma.cartItem.delete({
+      where: { id: cartItem.id }
+    });
+
+    return `Removed ${cartItem.title} from your cart.`;
+
+  } catch (error) {
+    console.error('[Agent] Remove from cart error:', error);
+    return "I'm having trouble removing that item. Please try again.";
+  }
+}
   extractProductFromMessage(message) {
     const lowerMessage = message.toLowerCase();
     
@@ -815,17 +1401,16 @@ async searchProducts(query) {
     return null;
   }
 
+
   async logInteraction(customerPhone, sessionId, message, intent = null, entities = null, response = null, productsShown = []) {
     try {
       if (DEBUG) {
         console.log(`[Agent] Would log interaction for ${customerPhone}: ${intent || 'unknown'}`);
       }
-      // You can implement actual logging to database here if needed
     } catch (error) {
       if (DEBUG) console.log(`[Agent] Logging skipped:`, error.message);
     }
   }
 }
 
-// Export as direct class, not in object
 module.exports = AgentService;
