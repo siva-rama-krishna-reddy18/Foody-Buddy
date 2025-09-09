@@ -6,7 +6,7 @@ import type {
   CartItem,
   OrderResponse,
   OrderItem
-} from '../../types/index';
+} from '../../types';
 
 class ChatService {
   async getHistory(sessionId: string) {
@@ -24,7 +24,16 @@ class ChatService {
     sessionId: string;
   }): Promise<ChatResponse> {
     const apiUrl = `${import.meta.env.VITE_API_BASE_URL}/api/v1/chat/chat`;
-    console.log('Calling API:', apiUrl, 'with data:', data);
+    console.log('Calling API:', apiUrl);
+    
+    // ✅ FIXED: Match backend expectations exactly
+    const requestBody = {
+      sessionId: data.sessionId,
+      customerId: data.customerId,  // ✅ Top-level field as expected by backend
+      text: data.text               // ✅ Use 'text' field as expected by backend
+    };
+    
+    console.log('Request body:', requestBody);
     
     const res = await fetch(apiUrl, {
       method: 'POST',
@@ -32,7 +41,7 @@ class ChatService {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(requestBody)
     });
     
     console.log('API Response status:', res.status);

@@ -1,6 +1,6 @@
 // src/components/chat/ChatContainer.tsx
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, ShoppingBag, MessageCircle, Menu, Star, Package } from 'lucide-react';
+import { Send, ShoppingBag, MessageCircle, Minimize2 } from 'lucide-react';
 import { useChatStore } from '../../stores/useChatStore';
 import { useCartStore } from '../../stores/useCartStore';
 import MessageBubble from './MessageBubble';
@@ -13,6 +13,7 @@ interface Props {
 export default function ChatContainer({ customerId }: Props) {
   const [inputText, setInputText] = useState('');
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -25,6 +26,17 @@ export default function ChatContainer({ customerId }: Props) {
   } = useChatStore();
 
   const { itemCount, loadCart } = useCartStore();
+
+  if (!customerId) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-gray-100">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading chat...</p>
+        </div>
+      </div>
+    );
+  }
 
   useEffect(() => {
     if (customerId) {
@@ -54,125 +66,122 @@ export default function ChatContainer({ customerId }: Props) {
     await addProductToCart(product);
   };
 
+  const handleShowCart = async () => {
+    await sendMessage('show my cart');
+  };
+  // In ChatContainer.tsx, add these handlers:
+const handleUpdateCartQuantity = async (productId: string, action: 'increase' | 'decrease') => {
+  if (action === 'increase') {
+    await sendMessage(`increase quantity of ${productId}`);
+  } else {
+    await sendMessage(`decrease quantity of ${productId}`);
+  }
+};
+
+const handleRemoveFromCart = async (productId: string) => {
+  await sendMessage(`remove ${productId} from cart`);
+};
+
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage(e);
+    }
+  };
+
   return (
-    <div className="flex flex-col h-screen bg-blue-50">
-      {/* Header */}
-      <div className="bg-white border-b px-3 py-3">
-        <div className="flex items-center justify-between">
+    <div className="h-screen w-full flex items-center justify-center p-4">
+      <div className={`bg-white rounded-2xl shadow-2xl border border-gray-200 transition-all duration-300 flex flex-col ${
+        isMinimized ? 'h-14 w-80' : 'h-[calc(100vh-2rem)] w-80'
+      }`}>
+        
+        <div className="bg-blue-500 text-white p-3 rounded-t-2xl flex items-center justify-between flex-shrink-0">
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
-              <MessageCircle className="w-4 h-4 text-black" />
+            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+              <MessageCircle className="w-4 h-4" />
             </div>
             <div>
-              <h1 className="text-black font-semibold text-sm">FoodyBuddy Assistant</h1>
-              <p className="text-black/70 text-xs">Your food ordering assistant</p>
+              <h3 className="font-semibold text-sm">FoodyBuddy</h3>
+              <p className="text-xs opacity-90">AI Food Assistant</p>
             </div>
           </div>
-
-          {/* Cart Button */}
-          <button
-            onClick={() => setIsCartOpen(true)}
-            className="relative bg-gray-200 hover:bg-gray-300 text-black px-3 py-2 rounded-full flex items-center space-x-1 transition-colors"
-          >
-            <ShoppingBag className="w-4 h-4" />
-            {itemCount > 0 && (
-              <div className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
-                {itemCount}
-              </div>
-            )}
-          </button>
-        </div>
-
-        {/* Navigation Buttons (always scrollable row for mobile-first) */}
-        <div className="flex overflow-x-auto mt-3 space-x-2 pb-1">
-          <button
-            onClick={() => sendMessage("Show me the menu")}
-            className="flex flex-col items-center bg-gray-100 rounded-lg px-3 py-2 text-xs font-medium text-black hover:bg-gray-200 min-w-[70px]"
-          >
-            <Menu className="w-4 h-4 mb-1" />
-            Menu
-          </button>
-          <button
-            onClick={() => sendMessage("Track my orders")}
-            className="flex flex-col items-center bg-gray-100 rounded-lg px-3 py-2 text-xs font-medium text-black hover:bg-gray-200 min-w-[70px]"
-          >
-            <Package className="w-4 h-4 mb-1" />
-            Orders
-          </button>
-          <button
-            onClick={() => sendMessage("What are today's specials?")}
-            className="flex flex-col items-center bg-gray-100 rounded-lg px-3 py-2 text-xs font-medium text-black hover:bg-gray-200 min-w-[70px]"
-          >
-            <Star className="w-4 h-4 mb-1" />
-            Specials
-          </button>
-          <button
-            onClick={() => setIsCartOpen(true)}
-            className="flex flex-col items-center bg-gray-100 rounded-lg px-3 py-2 text-xs font-medium text-black hover:bg-gray-200 min-w-[70px]"
-          >
-            <ShoppingBag className="w-4 h-4 mb-1" />
-            Cart
-          </button>
-        </div>
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
-        <div className="max-w-lg mx-auto">
-          {messages.map((message, index) => (
-            <MessageBubble
-              key={`${message.id || index}`}
-              message={message}
-              onAddToCart={handleAddToCart}
-              onSuggestionClick={handleSuggestionClick}
-            />
-          ))}
-
-          {isLoading && (
-            <div className="flex justify-start">
-              <div className="bg-white rounded-2xl px-3 py-2 shadow-sm border text-sm">
-                <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100"></div>
-                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200"></div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div ref={messagesEndRef} />
-        </div>
-      </div>
-
-      {/* Input */}
-      <div className="bg-white border-t px-3 py-3">
-        <div className="max-w-lg mx-auto">
-          <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
-            <input
-              type="text"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Type your message..."
-              className="flex-1 bg-gray-100 border-0 rounded-full px-3 py-2 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:bg-white transition-colors text-sm"
-              disabled={isLoading}
-            />
+          
+          <div className="flex items-center space-x-1">
             <button
-              type="submit"
-              disabled={!inputText.trim() || isLoading}
-              className="bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white p-2 rounded-full transition-colors"
+              onClick={handleShowCart}
+              className="relative p-1 hover:bg-blue-600 rounded"
             >
-              <Send className="w-4 h-4" />
+              <ShoppingBag className="w-4 h-4" />
+              {itemCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold">
+                  {itemCount}
+                </span>
+              )}
             </button>
-          </form>
+            
+            <button
+              onClick={() => setIsMinimized(!isMinimized)}
+              className="p-1 hover:bg-blue-600 rounded"
+            >
+              <Minimize2 className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-      </div>
 
-      {/* Cart Drawer */}
-      <CartDrawer
-        isOpen={isCartOpen}
-        onClose={() => setIsCartOpen(false)}
-        customerId={customerId}
-      />
+        {!isMinimized && (
+          <>
+            <div className="flex-1 overflow-y-auto p-3 bg-gray-50 space-y-2">
+              {messages.map((message, index) => (
+                <div key={`${message.id || index}`} className="text-sm">
+                  <MessageBubble
+  message={message}
+  onAddToCart={handleAddToCart}
+  onSuggestionClick={handleSuggestionClick}
+  onUpdateCartQuantity={handleUpdateCartQuantity}
+  onRemoveFromCart={handleRemoveFromCart}
+/>
+                </div>
+              ))}
+
+              {isLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-white rounded-2xl rounded-bl-md px-3 py-2 shadow-sm border">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+
+            <div className="p-3 border-t border-gray-200 rounded-b-2xl bg-white flex-shrink-0">
+              <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
+                <input
+                  type="text"
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="Type your message..."
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                  disabled={isLoading}
+                />
+                <button
+                  type="submit"
+                  disabled={!inputText.trim() || isLoading}
+                  className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full p-2 transition-colors"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </form>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

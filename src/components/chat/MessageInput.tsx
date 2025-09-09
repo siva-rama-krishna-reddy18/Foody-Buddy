@@ -8,11 +8,11 @@ interface Props {
 
 export default function MessageInput({ customerId }: Props) {
   const [message, setMessage] = useState('');
-  const { sendMessage, connected } = useChatStore();
+  const { sendMessage } = useChatStore();
 
   const handleSend = () => {
-    if (message.trim() && connected) {
-      sendMessage(message, customerId);
+    if (message.trim()) {
+      sendMessage(message);
       setMessage('');
     }
   };
@@ -32,19 +32,14 @@ export default function MessageInput({ customerId }: Props) {
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder={!connected ? "Connecting..." : "Type your message..."}
-          disabled={!connected}
-          className={`flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-            !connected 
-              ? 'bg-gray-100 text-gray-500 cursor-not-allowed' 
-              : 'bg-white'
-          }`}
+          placeholder="Type your message..."
+          className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
         <button
           onClick={handleSend}
-          disabled={!connected || !message.trim()}
+          disabled={!message.trim()}
           className={`px-6 py-2 rounded-lg font-medium transition-colors ${
-            !connected || !message.trim()
+            !message.trim()
               ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
               : 'bg-blue-500 text-white hover:bg-blue-600'
           }`}

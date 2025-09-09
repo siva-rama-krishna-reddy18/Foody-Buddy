@@ -2,7 +2,7 @@
 import { create } from 'zustand';
 import { api } from '../services/api/ApiClient';
 import { useCartStore } from './useCartStore';
-import type { ChatMessage, Product } from '../types/index';
+import type { ChatMessage, Product } from '../types';
 
 interface ChatSession {
   id: string;
@@ -89,20 +89,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
 
       if (response.success) {
+         console.log('🔍 Full API Response:', response);
+  console.log('🔍 API Response data:', response.data);
+  console.log('🔍 CartData from API:', response.data.cartData);
+  console.log('🔍 OrderData from API:', response.data.orderData);
+  console.log('🔍 OrderData type:', typeof response.data.orderData);
         const botMessage: ChatMessage = {
-          text: response.data.aiText,
+          text: response.data.cartData ? '' : response.data.aiText,
           sender: 'other',
           timestamp: new Date(),
           id: crypto.randomUUID(),
           intent: response.data.intent,
           products: response.data.productList,
-          suggestions: response.data.meta.suggestions
+          suggestions: response.data.meta.suggestions,
+          payment: response.data.payment,
+          cartData: response.data.cartData,
+          orderData: response.data.orderData
         };
+        console.log('🔍 Created botMessage:', botMessage);
+        console.log('🔍 BotMessage orderData:', botMessage.orderData);
 
         set(state => ({
           messages: [...state.messages, botMessage],
           isLoading: false
         }));
+
 
         // Update cart if cart data is provided
         if (response.data.addToCart) {
