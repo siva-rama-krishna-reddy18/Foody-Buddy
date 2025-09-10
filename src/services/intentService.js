@@ -10,7 +10,24 @@ async function classifyIntent(message) {
       return 'GREETING';
     }
     
-    // Payment/Checkout patterns (check before other patterns)
+    // Fix the coupon verification pattern - make it more specific
+if (/\b(was.*coupon.*used|coupon.*used|any.*coupon.*used|check.*coupon.*usage)\b.*\b(order|#)\s*\d+\b/.test(lowerMessage) ||
+    /\b(order|#)\s*\d+\b.*\b(coupon.*used|used.*coupon)\b/.test(lowerMessage)) {
+  return 'VERIFY_COUPON_USAGE';
+}
+
+// Keep the general coupon pattern AFTER the specific one
+if (/\b(coupon|coupons|discount|discounts|promo|promo code|offer|offers|deal|deals)\b/.test(lowerMessage)) {
+  return 'VIEW_COUPONS';
+
+}
+
+// Make the payment success pattern more flexible
+if (/\b(payment.*completed|payment.*successful|payment.*success|order.*placed|payment.*done)\b/.test(lowerMessage)) {
+  return 'PAYMENT_SUCCESS';
+}
+
+// Payment/Checkout patterns (check before other patterns)
     if (/\b(checkout|pay|payment|proceed.*pay|place.*order|complete.*order|pay.*now|make.*payment)\b/.test(lowerMessage)) {
       return 'CHECKOUT';
     }
@@ -24,12 +41,42 @@ async function classifyIntent(message) {
       return 'REMOVE_FROM_CART';
     }
     
-    // Order tracking by ID patterns (check this before general order status)
-    if (/\b(track|tracking|check|status|where.*is)\b.*\b(order|#)\s*\d+\b/.test(lowerMessage) ||
-        /\border\s*\d+\b/.test(lowerMessage) ||
-        /\b\d{3,}\b.*\b(order|status|track)\b/.test(lowerMessage)) {
-      return 'TRACK_ORDER';
-    }
+    // Customer Information Query patterns - MOST SPECIFIC FIRST
+/*if (/\b(give me|get|what.*is|tell me|show me)\b.*\b(email|phone|address|customer.*info|contact.*info|customer.*details)\b.*\b(order|#)\s*\d+\b/.test(lowerMessage) ||
+    /\b(email|phone|address|customer.*info|contact.*info|customer.*details)\b.*\b(order|#)\s*\d+\b/.test(lowerMessage)) {
+  return 'GET_CUSTOMER_INFO';
+}
+*/
+
+// Coupon verification patterns - SPECIFIC
+if (/\b(was.*coupon|coupon.*used|any.*coupon|check.*coupon)\b.*\b(order|#)\s*\d+\b/.test(lowerMessage) ||
+    /\b(order|#)\s*\d+\b.*\b(coupon|discount)\b/.test(lowerMessage)) {
+  return 'VERIFY_COUPON_USAGE';
+}
+
+
+// Customer search patterns - SPECIFIC
+if (/\b(find.*order.*for|latest.*order.*for|search.*orders.*for|search.*customer)\b/.test(lowerMessage) ||
+    /@/.test(lowerMessage) ||
+    /\+?\d{10,}/.test(lowerMessage)) { // Phone number pattern
+  return 'SEARCH_BY_CUSTOMER';
+}
+
+// Provisional order patterns - SPECIFIC
+if (/\b(provisional.*order|temp.*order)\b/.test(lowerMessage)) {
+  return 'TRACK_PROVISIONAL_ORDER';
+}
+
+if (/\b(any.*special.*instruction|special.*instruction|instruction.*for.*order|special.*request|note.*for.*order)\b/.test(lowerMessage)) {
+  return 'GET_SPECIAL_INSTRUCTIONS';
+}
+
+// GENERAL ORDER TRACKING (place AFTER specific patterns)
+if (/\b(track|tracking|check|status|where.*is)\b.*\b(order|#)\s*\d+\b/.test(lowerMessage) ||
+    /\border\s*\d+\b/.test(lowerMessage) ||
+    /\b\d{3,}\b.*\b(order|status|track)\b/.test(lowerMessage)) {
+  return 'TRACK_ORDER';
+}
     
     // Order status patterns (general history)
     if (/\b(order|orders|recent|history|status)\b/.test(lowerMessage) &&
@@ -61,6 +108,12 @@ async function classifyIntent(message) {
     if (/\b(love|like|hate|prefer|favorite|favourite|don't like|dislike)\b/.test(lowerMessage)) {
       return 'LEARN_PREFERENCE';
     }
+
+    // Add this pattern with your other cart patterns
+if (/^(clear\s+cart|empty\s+cart|remove\s+all|clear\s+my\s+cart)$/i.test(lowerMessage)) {
+  return 'CLEAR_CART';
+}
+
     
     // CONVERSATIONAL QUERIES - Let these go to AI
     // Hunger expressions
@@ -72,10 +125,11 @@ async function classifyIntent(message) {
     if (/^(what|how|why|when|where|which|can\s+you|could\s+you|would\s+you|tell\s+me|explain)/.test(lowerMessage)) {
       return 'UNKNOWN';
     }
+    
     // In intentService.js, add this to your intent patterns:
-if (lowerText.includes('reorder') && /\b\d{3,}\b/.test(text)) {
-  return 'REORDER';
-}
+    if (lowerMessage.includes('reorder') && /\b\d{3,}\b/.test(message)) {
+      return 'REORDER';
+    }
     
     // Natural conversation starters
     if (/\b(help|assist|advice|suggestion|opinion|think|feel|good\s+for|best\s+for)\b/.test(lowerMessage)) {
@@ -135,7 +189,7 @@ function extractEntities(message) {
 }
 
 if (DEBUG) {
-  console.log('[Intent] Service loaded with cart controls and AI-friendly classification');
+  console.log('[Intent] Service loaded with cart controls, coupon recognition, and AI-friendly classification');
 }
 
 module.exports = {

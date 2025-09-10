@@ -63,7 +63,7 @@ class AgentController {
         }
         // Only use fallback if no interactive data is present
         if (!orderData && !cartData && !out?.payment) {
-          return "Sorry, I didn't catch that. Could you rephrase?";
+          return "";
         }
         // Return empty string for interactive components
         return "";
