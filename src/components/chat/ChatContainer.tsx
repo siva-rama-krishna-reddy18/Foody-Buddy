@@ -63,7 +63,7 @@ export default function ChatContainer({ customerId }: Props) {
               <MessageCircle className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-semibold">FoodBot Assistant</h3>
+              <h3 className="font-semibold">FoodyBuddy Assistant</h3>
               <p className="text-xs opacity-80">Your personal food ordering assistant</p>
             </div>
           </div>
@@ -169,4 +169,5 @@ export default function ChatContainer({ customerId }: Props) {
       <CartDrawer isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} customerId={customerId} />
     </div>
   );
+
 }
