@@ -13,6 +13,8 @@ CHAT PAGE: http://localhost:5173/chat
 
 ## Changelog
 
+09/09/2025 7:13PM CST - Frontend UI Rollback. Added a Quick Actions Menu to the header.
+
 09/02/2025 4:55PM CST - Frontend UI Overhaul, Cart UI Update, Quick Action Buttons included.
 
 08/31/2025 5:05PM CST - Cart UI Update, with functional quantity change and cart item delete functionalities.
