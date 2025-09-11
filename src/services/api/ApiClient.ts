@@ -95,6 +95,7 @@ class CartService {
     customerId: string;
     productId: string;
     quantity: number;
+    cartItemId?: string;
   }) {
     const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/orders/cart/update`, {
       method: 'PUT',
