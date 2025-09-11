@@ -77,7 +77,7 @@ class OrderController {
       }
 
       // Generate order number
-      const orderNumber = Math.floor(100000 + Math.random() * 900000);
+      const orderNumber = Math.floor(10000 + Math.random() * 90000);
 
       // Create order with proper field mapping
       const order = await prisma.order.create({
@@ -491,53 +491,69 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
   }
 
   // Update cart item quantity
-  static async updateCartItem(req, res) {
-    try {
-      const { customerId, productId, quantity } = req.body;
+static async updateCartItem(req, res) {
+  try {
+    const { customerId, productId, quantity, cartItemId } = req.body;
 
-      if (quantity <= 0) {
-        return res.status(400).json({
-          success: false,
-          error: 'Quantity must be greater than 0'
-        });
-      }
-
-      // Find customer's cart
-      const cart = await prisma.carts.findFirst({
-        where: { customer_id: customerId }
+    if (quantity <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Quantity must be greater than 0'
       });
+    }
 
-      if (!cart) {
-        return res.status(404).json({
-          success: false,
-          error: 'Cart not found'
-        });
-      }
-
-      const cartItem = await prisma.cartItem.updateMany({
-        where: {
-          cart_id: cart.id,
-          productId: productId
-        },
+    // If cartItemId is provided, use it directly
+    if (cartItemId) {
+      const cartItem = await prisma.cartItem.update({
+        where: { id: cartItemId },
         data: { 
           quantity,
           updated_at: new Date()
         }
       });
 
-      res.json({
+      return res.json({
         success: true,
         data: cartItem
       });
+    }
 
-    } catch (error) {
-      console.error('Update cart item error:', error);
-      res.status(500).json({
+    // Otherwise, find by customer and product
+    const cart = await prisma.carts.findFirst({
+      where: { customer_id: customerId }
+    });
+
+    if (!cart) {
+      return res.status(404).json({
         success: false,
-        error: 'Failed to update cart item'
+        error: 'Cart not found'
       });
     }
+
+    const cartItem = await prisma.cartItem.updateMany({
+      where: {
+        cart_id: cart.id,
+        productId: productId
+      },
+      data: { 
+        quantity,
+        updated_at: new Date()
+      }
+    });
+
+    res.json({
+      success: true,
+      data: cartItem
+    });
+
+  } catch (error) {
+    console.error('Update cart item error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update cart item'
+    });
   }
+}
 
   // Remove item from cart
   static async removeFromCart(req, res) {
