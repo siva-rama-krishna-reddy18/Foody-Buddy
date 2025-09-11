@@ -17,12 +17,14 @@ interface Props {
   isOpen?: boolean;
   onClose?: () => void;
   customerId?: string;
+  onStartPayment?: () => void; // Add this prop
 }
 
 export default function CartDrawer({ 
   isOpen = false, 
   onClose = () => {}, 
-  customerId = '' 
+  customerId = '',
+  onStartPayment // Add this parameter
 }: Props) {
   const { items, isLoading, updateQuantity, removeItem, clearCart } = useCartStore();
   const [isOrdering, setIsOrdering] = React.useState(false);
@@ -50,6 +52,10 @@ export default function CartDrawer({
   }
 
   const handleQuantityChange = async (item: CartItem, newQuantity: number) => {
+    console.log('Button clicked! Updating:', item.name, 'from', item.quantity, 'to', newQuantity);
+    console.log('Customer ID:', customerId);
+    console.log('Item details:', item);
+    
     try {
       if (newQuantity <= 0) {
         await removeItem(customerId, item.productId);
@@ -71,32 +77,16 @@ export default function CartDrawer({
     }
   };
 
+  // Updated handlePlaceOrder to use onStartPayment
   const handlePlaceOrder = async () => {
     if (items.length === 0) return;
     
-    setIsOrdering(true);
-    try {
-      const orderItems = items.map(item => ({
-        productId: item.productId,
-        quantity: item.quantity
-      }));
-
-      const response = await api.orders.placeOrder({
-        customerId,
-        items: orderItems,
-        paymentMethod: 'CARD'
-      });
-
-      if (response.success) {
-        await clearCart(customerId);
-        alert(`Order placed successfully! Order #${response.data.orderNumber}\nEstimated delivery: ${response.data.estimatedDelivery}`);
-        onClose();
-      }
-    } catch (error) {
-      console.error('Order placement error:', error);
-      alert('Failed to place order. Please try again.');
-    } finally {
-      setIsOrdering(false);
+    // Close the cart drawer
+    onClose();
+    
+    // Trigger chat payment flow if function is available
+    if (onStartPayment) {
+      onStartPayment();
     }
   };
 
@@ -209,22 +199,14 @@ export default function CartDrawer({
                 {getTotalItems()} item{getTotalItems() !== 1 ? 's' : ''} • Delivery in 30-45 mins
               </div>
 
+              {/* Updated Place Order button to redirect to chat */}
               <button
                 onClick={handlePlaceOrder}
-                disabled={isOrdering || isLoading}
+                disabled={isLoading}
                 className="w-full bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white py-3 rounded-xl font-semibold flex items-center justify-center space-x-2 transition-colors"
               >
-                {isOrdering ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    <span>Placing Order...</span>
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="h-4 w-4" />
-                    <span>Place Order</span>
-                  </>
-                )}
+                <CreditCard className="h-4 w-4" />
+                <span>Proceed to Chat Checkout</span>
               </button>
             </div>
           )}
