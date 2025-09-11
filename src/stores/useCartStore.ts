@@ -32,12 +32,15 @@ export const useCartStore = create<CartState>((set, get) => ({
   loadCart: async (customerId: string) => {
     set({ isLoading: true, error: null });
     try {
+      console.log('Loading cart for customer:', customerId);
       const response = await api.cart.getCart(customerId);
+      console.log('Cart response:', response);
+      
       const cartData = response.data;
       
       set({
         items: cartData.items || [],
-        total: parseFloat(cartData.totalAmount || '0'),
+        total: parseFloat(cartData.total || '0'),
         itemCount: cartData.itemCount || 0,
         isLoading: false
       });
@@ -56,6 +59,7 @@ export const useCartStore = create<CartState>((set, get) => ({
   addItem: async (customerId: string, productId: string, quantity = 1) => {
     set({ isLoading: true, error: null });
     try {
+      console.log('Adding item to cart:', { customerId, productId, quantity });
       await api.cart.addToCart({ customerId, productId, quantity });
       // Reload cart to get updated state
       await get().loadCart(customerId);
@@ -73,7 +77,28 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     set({ isLoading: true, error: null });
     try {
-      await api.cart.updateCartItem({ customerId, productId, quantity });
+      console.log('Updating quantity:', { customerId, productId, quantity });
+      
+      // Find the cart item ID from current items
+      const { items } = get();
+      const cartItem = items.find(item => item.productId === productId);
+      
+      if (cartItem) {
+        await api.cart.updateCartItem({ 
+          cartItemId: cartItem.id,
+          customerId, 
+          productId, 
+          quantity 
+        });
+      } else {
+        // Fallback to customer/product lookup
+        await api.cart.updateCartItem({ 
+          customerId, 
+          productId, 
+          quantity 
+        });
+      }
+      
       await get().loadCart(customerId);
     } catch (error) {
       console.error('Update quantity error:', error);
@@ -84,6 +109,7 @@ export const useCartStore = create<CartState>((set, get) => ({
   removeItem: async (customerId: string, productId: string) => {
     set({ isLoading: true, error: null });
     try {
+      console.log('Removing item:', { customerId, productId });
       await api.cart.removeFromCart(customerId, productId);
       await get().loadCart(customerId);
     } catch (error) {
