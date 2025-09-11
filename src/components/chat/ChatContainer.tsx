@@ -26,7 +26,8 @@ export default function ChatContainer({ customerId }: Props) {
     initializeChat
   } = useChatStore();
 
-  const { itemCount, loadCart } = useCartStore();
+  // Add these missing functions from useCartStore
+  const { itemCount, loadCart, updateQuantity, removeItem } = useCartStore();
 
   useEffect(() => {
     if (customerId) {
@@ -46,6 +47,54 @@ export default function ChatContainer({ customerId }: Props) {
     const messageText = inputText.trim();
     setInputText('');
     await sendMessage(messageText);
+  };
+
+  // ADD these handler functions for chat cart buttons
+  const handleUpdateCartQuantity = async (productId: string, action: 'increase' | 'decrease') => {
+    try {
+      // Get current items from cart store
+      const { items } = useCartStore.getState();
+      const cartItem = items.find(item => item.productId === productId);
+      
+      if (cartItem) {
+        const newQuantity = action === 'increase' 
+          ? cartItem.quantity + 1 
+          : Math.max(0, cartItem.quantity - 1);
+        
+        if (newQuantity === 0) {
+          await removeItem(customerId, productId);
+        } else {
+          await updateQuantity(customerId, productId, newQuantity);
+        }
+        
+        // Refresh cart and trigger chat cart update
+        await loadCart(customerId);
+        sendQuickAction('Show my cart');
+      }
+    } catch (error) {
+      console.error('Error updating cart quantity:', error);
+    }
+  };
+
+  const handleRemoveFromCart = async (productId: string) => {
+    try {
+      await removeItem(customerId, productId);
+      await loadCart(customerId);
+      sendQuickAction('Show my cart');
+    } catch (error) {
+      console.error('Error removing from cart:', error);
+    }
+  };
+
+  const handlePaymentSuccess = () => {
+    loadCart(customerId);
+    sendQuickAction('Payment completed successfully! Your order is being prepared.');
+  };
+
+  // ADD this function to handle cart drawer payment redirect
+  const handleStartPayment = () => {
+    setIsCartOpen(false); // Close cart drawer
+    sendQuickAction('Proceed to pay'); // Start chat payment
   };
 
   const quickActions = ['View Menu', 'Track Orders', "Today's Specials", 'Show my cart'];
@@ -128,6 +177,10 @@ export default function ChatContainer({ customerId }: Props) {
                   message={message}
                   onAddToCart={addProductToCart}
                   onSuggestionClick={sendQuickAction}
+                  onPaymentSuccess={handlePaymentSuccess}
+                  onUpdateCartQuantity={handleUpdateCartQuantity}
+                  onRemoveFromCart={handleRemoveFromCart}
+                  customerId={customerId}
                 />
               ))}
 
@@ -165,9 +218,13 @@ export default function ChatContainer({ customerId }: Props) {
         )}
       </div>
 
-      {/* Cart Drawer */}
-      <CartDrawer isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} customerId={customerId} />
+      {/* Cart Drawer - ADD onStartPayment prop */}
+      <CartDrawer 
+        isOpen={isCartOpen} 
+        onClose={() => setIsCartOpen(false)} 
+        customerId={customerId}
+        onStartPayment={handleStartPayment}
+      />
     </div>
   );
-
 }
