@@ -88,7 +88,6 @@ export default function ChatContainer({ customerId }: Props) {
 
   const handlePaymentSuccess = () => {
     loadCart(customerId);
-    sendQuickAction('Payment completed successfully! Your order is being prepared.');
   };
 
   // ADD this function to handle cart drawer payment redirect
@@ -228,3 +227,4 @@ export default function ChatContainer({ customerId }: Props) {
     </div>
   );
 }
+
