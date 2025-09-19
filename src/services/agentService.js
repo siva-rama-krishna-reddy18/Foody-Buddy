@@ -174,13 +174,13 @@ getEstimatedDelivery(status) {
   switch (status?.toUpperCase()) {
     case 'PENDING':
     case 'CONFIRMED':
-      const prepTime = new Date(now.getTime() + 10 * 60000); // 10 minutes
+      const prepTime = new Date(now.getTime() + 0.5 * 60000); // 30 seconds
       return prepTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     case 'PREPARING':
-      const cookTime = new Date(now.getTime() + 5 * 60000); // 5 minutes
+      const cookTime = new Date(now.getTime() + 1 * 60000); // 1 minute
       return cookTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     case 'OUT_FOR_DELIVERY':
-      const deliveryTime = new Date(now.getTime() + 10 * 60000); // 10 minutes
+      const deliveryTime = new Date(now.getTime() + 0.5 * 60000); // 30 seconds
       return deliveryTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     default:
       return null;
@@ -514,48 +514,166 @@ async handleConversationalQuery(message, sessionId, customerId, intent) {
     }
   }
 
-  async handlePaymentSuccess(customerId, paymentData = null) {
+  // Replace your handlePaymentSuccess method with this robust version:
+
+async handlePaymentSuccess(customerId, paymentData = null) {
   try {
-    // Get current cart data if paymentData not provided
+    console.log('[Agent] === PAYMENT SUCCESS START ===');
+    console.log('[Agent] Customer ID:', customerId);
+    
+    // STEP 1: Get cart data FIRST
+    const cartData = await this.getCartData(customerId);
+    console.log('[Agent] Cart data retrieved:', JSON.stringify(cartData, null, 2));
+    
     if (!paymentData) {
-      const cartData = await this.getCartData(customerId);
       paymentData = { total: cartData ? cartData.total : 0 };
     }
 
-    console.log('[Agent] Payment success for customer:', customerId);
     console.log('[Agent] Payment amount:', paymentData.total);
     
-    // Clear cart first
-    const cart = await prisma.carts.findFirst({
-      where: { customer_id: customerId }
-    });
-
-    if (cart) {
-      await prisma.cartItem.deleteMany({
-        where: { cart_id: cart.id }
-      });
-    }
-
     const orderNumber = Math.floor(100000 + Math.random() * 500000);
+    console.log('[Agent] Generated order number:', orderNumber);
     
+    // STEP 2: Create the order
     const newOrder = await prisma.order.create({
       data: {
         orderNumber: orderNumber,
         customerId: customerId,
-        amount: paymentData.total, // Dynamic amount
+        amount: paymentData.total,
         status: 'CONFIRMED',
         createdAt: new Date(),
       }
     });
     
+    console.log('[Agent] Order created:', newOrder.id);
+    
+    // STEP 3: Save cart items to orderLineItems
+    if (cartData && cartData.items && cartData.items.length > 0) {
+      console.log('[Agent] Processing', cartData.items.length, 'cart items...');
+      
+      for (let i = 0; i < cartData.items.length; i++) {
+        const cartItem = cartData.items[i];
+        console.log(`[Agent] Processing item ${i + 1}:`, cartItem);
+        
+        try {
+          // Use multiple fallback methods for ID generation
+          let itemId;
+          try {
+            itemId = require('uuid').v4();
+          } catch (uuidError) {
+            // Fallback to crypto if uuid fails
+            itemId = require('crypto').randomUUID();
+          }
+          
+          // Replace the entire orderLineItems creation block with this:
+const orderLineItem = await prisma.orderLineItem.create({
+  data: {
+    orderId: newOrder.orderNumber,
+    productId: cartItem.productId,
+    productName: cartItem.name,
+    quantity: cartItem.quantity,
+    price: parseFloat(cartItem.price)
+  }
+});
+          console.log('[Agent] Successfully saved item:', cartItem.name, 'with ID:', orderLineItem.id);
+          
+        } catch (itemError) {
+          console.error('[Agent] Error saving item:', cartItem.name, itemError);
+          
+          // Try alternative table structure
+          try {
+            await prisma.orderLineItem.create({
+  data: {
+    orderId: newOrder.orderNumber,
+    productId: item.productId,
+    productName: item.title || item.products?.name,
+    quantity: item.quantity,
+    price: parseFloat(item.unit_price || item.products?.price || 0)
+  }
+});
+            console.log('[Agent] Saved to alternative table:', cartItem.name);
+          } catch (altError) {
+            console.error('[Agent] Both table attempts failed for:', cartItem.name);
+          }
+        }
+      }
+    } else {
+      console.log('[Agent] WARNING: No cart items found!');
+      console.log('[Agent] Cart data was:', cartData);
+      
+      // Let's double-check the cart
+      try {
+        const cart = await prisma.carts.findFirst({
+          where: { customer_id: customerId }
+        });
+        
+        if (cart) {
+          const cartItems = await prisma.cartItem.findMany({
+            where: { cart_id: cart.id },
+            include: { products: true }
+          });
+          console.log('[Agent] Direct cart check found:', cartItems.length, 'items');
+          
+          // If we found items this way, save them
+          if (cartItems.length > 0) {
+            for (const item of cartItems) {
+              try {
+                let itemId;
+                try {
+                  itemId = require('uuid').v4();
+                } catch (uuidError) {
+                  itemId = require('crypto').randomUUID();
+                }
+                
+                await prisma.orderLineItems.create({
+                  data: {
+                    id: itemId,
+                    orderId: newOrder.id,
+                    productId: item.productId,
+                    productName: item.title || item.products?.name,
+                    quantity: item.quantity,
+                    price: parseFloat(item.unit_price || item.products?.price || 0),
+                    createdAt: new Date(),
+                    updatedAt: new Date()
+                  }
+                });
+                console.log('[Agent] Saved direct cart item:', item.title);
+              } catch (directError) {
+                console.error('[Agent] Error saving direct cart item:', directError);
+              }
+            }
+          }
+        }
+      } catch (cartCheckError) {
+        console.error('[Agent] Error checking cart directly:', cartCheckError);
+      }
+    }
+    
+    // STEP 4: Clear cart ONLY AFTER saving items
+    try {
+      const cart = await prisma.carts.findFirst({
+        where: { customer_id: customerId }
+      });
+
+      if (cart) {
+        await prisma.cartItem.deleteMany({
+          where: { cart_id: cart.id }
+        });
+        console.log('[Agent] Cart cleared successfully');
+      }
+    } catch (clearError) {
+      console.error('[Agent] Error clearing cart:', clearError);
+    }
+    
+    console.log('[Agent] === PAYMENT SUCCESS COMPLETE ===');
     return `Payment successful! Your order #${orderNumber} has been confirmed for $${paymentData.total}. Thank you for choosing FoodyBuddy!`;
     
   } catch (error) {
     console.error('[Agent] Payment success error:', error);
     return "Payment was successful! Your order is being prepared. Thank you!";
-    
   }
 }
+
 
   async handleGreeting(customerId) {
     try {
@@ -638,108 +756,168 @@ async handleConversationalQuery(message, sessionId, customerId, intent) {
   }
 
 
-  async handleOrderTracking(message) {
+  // Replace your handleOrderTracking method with this enhanced debug version:
+
+async handleOrderTracking(message) {
+  try {
+    // Extract order ID from message
+    const orderIdMatch = message.match(/\b(\d{3,})\b/);
+    
+    if (!orderIdMatch) {
+      return "Please provide your order ID. For example: 'Track order 12345' or just enter the order number.";
+    }
+    
+    const orderId = orderIdMatch[1];
+    console.log(`[Agent] DEBUG: Looking for order ${orderId}`);
+    
+    // Search for order by order number
+    let order = null;
+    
     try {
-      // Extract order ID from message
-      const orderIdMatch = message.match(/\b(\d{3,})\b/);
+      // Search for order by order number only
+      order = await prisma.order.findFirst({
+        where: {
+          orderNumber: parseInt(orderId)
+        },
+        include: {
+          orderLineItems: true
+        }
+      });
       
-      if (!orderIdMatch) {
-        return "Please provide your order ID. For example: 'Track order 12345' or just enter the order number.";
-      }
+      console.log(`[Agent] DEBUG: Found order:`, order);
+      console.log(`[Agent] DEBUG: Order line items:`, order?.orderLineItems);
+      console.log(`[Agent] DEBUG: Number of items:`, order?.orderLineItems?.length);
       
-      const orderId = orderIdMatch[1];
-      
-      // Search for order by order number
-      let order = null;
-      
-      try {
-        // Search for order by order number only
-        order = await prisma.order.findFirst({
-          where: {
-            orderNumber: parseInt(orderId)
-          },
-          include: {
-            orderLineItems: true  // Remove the product include since relation doesn't exist
-          }
-        });
-        
-        // If we found the order but product names are missing, fetch them manually
-        if (order && order.orderLineItems) {
-          for (let item of order.orderLineItems) {
-            if (!item.productName && item.productId) {
-              try {
-                const product = await prisma.product.findUnique({
-                  where: { id: item.productId }
-                });
-                if (product) {
-                  item.productName = product.name; // Add the product name to the item
-                }
-              } catch (productError) {
-                console.log('[Agent] Could not fetch product for item:', item.productId);
+      // If we found the order but product names are missing, fetch them manually
+      if (order && order.orderLineItems) {
+        for (let item of order.orderLineItems) {
+          console.log(`[Agent] DEBUG: Processing item:`, item);
+          
+          if (!item.productName && item.productId) {
+            try {
+              const product = await prisma.product.findUnique({
+                where: { id: item.productId }
+              });
+              console.log(`[Agent] DEBUG: Found product:`, product);
+              if (product) {
+                item.productName = product.name;
+                console.log(`[Agent] DEBUG: Set product name to:`, item.productName);
               }
+            } catch (productError) {
+              console.log('[Agent] Could not fetch product for item:', item.productId, productError.message);
+              item.productName = item.productName || 'Unknown Item';
             }
           }
         }
-      } catch (error) {
-        console.error('[Agent] Order lookup error:', error);
       }
-      
-      if (!order) {
-        return `I couldn't find an order with ID "${orderId}". Please check your order number and try again. You can find your order ID in your confirmation email or receipt.`;
-      }
-      
-      // Format order status response
-      const orderNumber = order.orderNumber || order.order_number || order.id;
-      const status = order.status || 'Processing';
-      const createdDate = new Date(order.createdAt || order.created_at).toLocaleDateString();
-      const amount = order.amount || order.total_amount || '0';
-      
-      // Calculate estimated delivery time based on status
-      let statusMessage = '';
-      let estimatedTime = '';
-      
-      switch (status.toUpperCase()) {
-        case 'PENDING':
-        case 'CONFIRMED':
-          statusMessage = 'Order confirmed and being prepared';
-          estimatedTime = '25-35 minutes';
-          break;
-        case 'PREPARING':
-          statusMessage = 'Your order is being prepared in our kitchen';
-          estimatedTime = '15-25 minutes';
-          break;
-        case 'OUT_FOR_DELIVERY':
-          statusMessage = 'Order is out for delivery';
-          estimatedTime = '10-15 minutes';
-          break;
-        case 'DELIVERED':
-          statusMessage = 'Order has been delivered';
-          estimatedTime = 'Completed';
-          break;
-        case 'CANCELLED':
-          statusMessage = 'Order was cancelled';
-          estimatedTime = 'N/A';
-          break;
-        
-        default:
-          statusMessage = `Order status: ${status}`;
-          estimatedTime = 'Please contact support for details';
-      }
-      
-      // Build order items list with debugging
-      let itemsList = '';
-if (order.orderLineItems && order.orderLineItems.length > 0) {
-  itemsList = '\n\nItems:\n' + order.orderLineItems.map(item => {
-    const productName = item.productName || `Product ID: ${item.productId}` || 'Unknown Item';
-    const quantity = item.quantity || 1;
-    const price = item.price || 0;
-    const instructions = item.specialInstructions ? ` (Note: ${item.specialInstructions})` : '';
+    } catch (error) {
+      console.error('[Agent] Order lookup error:', error);
+    }
     
-    return `• ${productName} x${quantity} - $${parseFloat(price).toFixed(2)}${instructions}`;
-  }).join('\n');
-}
+    if (!order) {
+      return `I couldn't find an order with ID "${orderId}". Please check your order number and try again.`;
+    }
+    
+    // Format order status response
+    const orderNumber = order.orderNumber || order.order_number || order.id;
+    const status = order.status || 'Processing';
+    const createdDate = new Date(order.createdAt || order.created_at).toLocaleDateString();
+    const amount = order.amount || order.total_amount || '0';
+    
+    // Calculate estimated delivery time based on status
+    let statusMessage = '';
+    let estimatedTime = '';
+    
+    switch (status.toUpperCase()) {
+      case 'PENDING':
+      case 'CONFIRMED':
+        statusMessage = 'Order confirmed and being prepared';
+        estimatedTime = '25-35 minutes';
+        break;
+      case 'PREPARING':
+        statusMessage = 'Your order is being prepared in our kitchen';
+        estimatedTime = '20-30 minutes';
+        break;
+      case 'OUT_FOR_DELIVERY':
+        statusMessage = 'Order is out for delivery';
+        estimatedTime = '30-40 minutes';
+        break;
+      case 'DELIVERED':
+        statusMessage = 'Order has been delivered';
+        estimatedTime = 'Completed';
+        break;
+      case 'CANCELLED':
+        statusMessage = 'Order was cancelled';
+        estimatedTime = 'N/A';
+        break;
+      default:
+        statusMessage = `Order status: ${status}`;
+        estimatedTime = 'Please contact support for details';
+    }
+    
+    // Enhanced items list building with better debugging
+    let itemsList = '';
+    console.log(`[Agent] DEBUG: Building items list...`);
+    
+    if (order.orderLineItems && order.orderLineItems.length > 0) {
+      console.log(`[Agent] DEBUG: Found ${order.orderLineItems.length} items`);
       
-      const response = `Order #${orderNumber} Status:
+      itemsList = '\n\nItems Ordered:';
+      order.orderLineItems.forEach((item, index) => {
+        console.log(`[Agent] DEBUG: Item ${index}:`, {
+          productName: item.productName,
+          productId: item.productId,
+          quantity: item.quantity,
+          price: item.price
+        });
+        
+        const productName = item.productName || 
+                           item.title || 
+                           (item.productId ? `Product ID: ${item.productId}` : null) || 
+                           'Unknown Item';
+        const quantity = item.quantity || 1;
+        const price = parseFloat(item.price || item.unitPrice || 0);
+        const itemTotal = (price * quantity).toFixed(2);
+        const instructions = item.specialInstructions ? `\n   Special note: ${item.specialInstructions}` : '';
+        
+        itemsList += `\n• ${productName} × ${quantity} = $${itemTotal}${instructions}`;
+      });
+      
+      // Calculate and show total
+      const calculatedTotal = order.orderLineItems.reduce((sum, item) => {
+        const itemPrice = parseFloat(item.price || item.unitPrice || 0);
+        const itemQty = item.quantity || 1;
+        return sum + (itemPrice * itemQty);
+      }, 0);
+      
+      itemsList += `\n\nOrder Total: $${calculatedTotal.toFixed(2)}`;
+    } else {
+      console.log(`[Agent] DEBUG: No items found - checking alternative locations`);
+      
+      // Try alternative table names or structures
+      try {
+        // Check if items are stored differently
+        const alternativeItems = await prisma.orderItems?.findMany?.({
+          where: { orderId: order.id }
+        }) || [];
+        
+        if (alternativeItems.length > 0) {
+          console.log(`[Agent] DEBUG: Found items in alternative table:`, alternativeItems);
+          itemsList = '\n\nItems Ordered:\n' + alternativeItems.map(item => 
+            `• ${item.name || 'Item'} × ${item.quantity || 1} = $${parseFloat(item.price || 0).toFixed(2)}`
+          ).join('\n');
+        } else {
+          itemsList = '\n\nItems: No items found for this order (this might be a data issue)';
+        }
+      } catch (altError) {
+        console.log(`[Agent] DEBUG: Alternative items table not found`);
+        itemsList = '\n\nItems: Item details are not available for this order';
+      }
+    }
+    
+    console.log(`[Agent] DEBUG: Final itemsList:`, itemsList);
+    
+    const response = `Order #${orderNumber} Status:
 
 ${statusMessage}
 Amount: $${amount}
@@ -747,16 +925,17 @@ Order Date: ${createdDate}
 ${estimatedTime !== 'N/A' && estimatedTime !== 'Completed' ? `Estimated Time: ${estimatedTime}` : ''}${itemsList}
 
 ${status.toUpperCase() === 'DELIVERED' ? 'Thank you for your order!' : 'We\'ll notify you of any updates!'}`;
-      
-      return response;
-      
-    } catch (error) {
-      console.error('[Agent] Order tracking error:', error);
-      return "I'm having trouble accessing order information right now. Please try again or contact our support team.";
-    }
+    
+    console.log(`[Agent] DEBUG: Final response:`, response);
+    return response;
+    
+  } catch (error) {
+    console.error('[Agent] Order tracking error:', error);
+    return "I'm having trouble accessing order information right now. Please try again or contact our support team.";
   }
-
-  async handleReorder(customerId, message) {
+}
+ 
+async handleReorder(customerId, message) {
   try {
     // Extract order number from message
     const orderMatch = message.match(/\b(\d{3,})\b/);

@@ -77,16 +77,16 @@ function prehandle(userMsg) {
   }
 
   // Generic dinner ask
-  if (/can i get some food|suggest.*dinner|recommend.*(food|dinner)|hungry|what.*(eat|for dinner)/i.test(t)) {
-    return 'Are you in the mood for vegetarian or non-veg? Any spice preference? I can list options you can add to your cart.';
-  }
+  // if (/can i get some food|suggest.*dinner|recommend.*(food|dinner)|hungry|what.*(eat|for dinner)/i.test(t)) {
+    // return 'Are you in the mood for vegetarian or non-veg? Any spice preference? I can list options you can add to your cart.';
+  // }
 
   // Generic cuisine nudge (only when no specific dish was found)
-  if (/\bindian\b/.test(t)) {
-    return 'We have great Indian options. Say “veg” or “non-veg” and I’ll list a few to add to your cart.';
-  }
+  // if (/\bindian\b/.test(t)) {
+    // return 'We have great Indian options. Say “veg” or “non-veg” and I’ll list a few to add to your cart.';
+  // }
 
-  if (isNonVeg) {
+  /*if (isNonVeg) {
   return 'Non-veg, got it! Popular picks: Chicken Tikka Masala, Chicken or Goat Biryani. Which one and how many?';
 }
 
@@ -96,7 +96,7 @@ function prehandle(userMsg) {
   if (isVeg) {
     return 'Vegetarian—great choice! Popular picks: Paneer Tikka Masala, Palak Paneer, Aloo Gobi, Chana Pindi. Tell me which one and how many.';
   }
-
+  */
   if (/menu|show.*menu|list.*menu/i.test(t)) {
     return 'Tell me “veg” or “non-veg,” or name a dish (biryani, paneer, tikka), and I’ll show items you can add to your cart.';
   }

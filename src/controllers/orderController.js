@@ -6,32 +6,33 @@ const prisma = new PrismaClient();
 class OrderController {
   // Automatic order status progression
   static async simulateOrderProgress(orderNumber) {
-    const statuses = ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY', 'DELIVERED'];
-    let currentIndex = 0;
+  const statuses = ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY', 'DELIVERED'];
+  let currentIndex = 0;
+  
+  console.log(`[Order] Starting automatic progression for order ${orderNumber}`);
+  
+  const interval = setInterval(async () => {
+    if (currentIndex >= statuses.length) {
+      console.log(`[Order] Order ${orderNumber} progression complete - DELIVERED`);
+      clearInterval(interval);
+      return;
+    }
     
-    console.log(`[Order] Starting automatic progression for order ${orderNumber}`);
-    
-    const interval = setInterval(async () => {
-      if (currentIndex >= statuses.length) {
-        console.log(`[Order] Order ${orderNumber} progression complete - DELIVERED`);
-        clearInterval(interval);
-        return;
-      }
+    try {
+      const result = await prisma.order.update({
+        where: { orderNumber: parseInt(orderNumber) },
+        data: { status: statuses[currentIndex] }
+      });
       
-      try {
-        await prisma.order.update({
-          where: { orderNumber: parseInt(orderNumber) },
-          data: { status: statuses[currentIndex] }
-        });
-        
-        console.log(`[Order] Order ${orderNumber} status updated to: ${statuses[currentIndex]}`);
-        currentIndex++;
-      } catch (error) {
-        console.error(`[Order] Status update failed for ${orderNumber}:`, error);
-        clearInterval(interval);
-      }
-    }, 10000); // Update every 30 seconds
-  }
+      console.log(`[Order] Order ${orderNumber} status updated to: ${statuses[currentIndex]}`);
+      console.log('[Order] Update result:', result); // Add this line
+      currentIndex++;
+    } catch (error) {
+      console.error(`[Order] Status update failed for ${orderNumber}:`, error);
+      clearInterval(interval);
+    }
+  }, 5000); // Reduced to 5 seconds for faster demo
+}
 
   // Place a new order
   static async placeOrder(req, res) {
