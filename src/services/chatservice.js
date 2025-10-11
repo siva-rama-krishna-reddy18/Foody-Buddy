@@ -1,24 +1,22 @@
-const { PrismaClient } = require('@prisma/client');
+// src/services/chatService.js
 const { v4: uuidv4 } = require('uuid');
+const ChatSession = require('../../models/ChatSession');
+const Message = require('../../models/Message');
 
-const messageService = require('./messageService');          // delegate for messages
-const aiResponseService = require('./aiResponseService');    // delegate for AI (compat)
-
-const prisma = new PrismaClient();
+const messageService = require('./messageService');
+const aiResponseService = require('./aiResponseService');
 
 class ChatService {
   // ---- Session APIs (authoritative here) ----
   async createSession(customerId, title = null) {
     try {
       const now = new Date();
-      return await prisma.chat_sessions.create({
-        data: {
-          id: uuidv4(),
-          customer_id: customerId,
-          title: title || `Chat ${new Date().toLocaleDateString()}`,
-          created_at: now,
-          updated_at: now
-        }
+      return await ChatSession.create({
+        id: uuidv4(),
+        customer_id: customerId,
+        title: title || `Chat ${new Date().toLocaleDateString()}`,
+        created_at: now,
+        updated_at: now
       });
     } catch (error) {
       console.error('Error creating session:', error);
@@ -28,12 +26,25 @@ class ChatService {
 
   async getUserSessions(customerId, limit = 20) {
     try {
-      return await prisma.chat_sessions.findMany({
-        where: { customer_id: customerId },
-        include: { _count: { select: { messages: true } } },
-        orderBy: { updated_at: 'desc' },
-        take: limit
-      });
+      const sessions = await ChatSession.find({ customer_id: customerId })
+        .sort({ updated_at: -1 })
+        .limit(limit)
+        .lean();
+
+      // Add message count for each session
+      const sessionsWithCount = await Promise.all(
+        sessions.map(async (session) => {
+          const messageCount = await Message.countDocuments({ session_id: session.id });
+          return {
+            ...session,
+            _count: {
+              messages: messageCount
+            }
+          };
+        })
+      );
+
+      return sessionsWithCount;
     } catch (error) {
       console.error('Error getting user sessions:', error);
       throw error;
@@ -42,10 +53,9 @@ class ChatService {
 
   async getSessionById(sessionId) {
     try {
-      return await prisma.chat_sessions.findUnique({
-        where: { id: sessionId },
-        select: { id: true, customer_id: true, title: true, created_at: true, updated_at: true }
-      });
+      return await ChatSession.findOne({ id: sessionId })
+        .select('id customer_id title created_at updated_at')
+        .lean();
     } catch (error) {
       console.error('Error getting session by ID:', error);
       throw error;
@@ -54,12 +64,21 @@ class ChatService {
 
   async deleteSession(sessionId, customerId) {
     try {
-      const session = await prisma.chat_sessions.findFirst({
-        where: { id: sessionId, customer_id: customerId }
+      const session = await ChatSession.findOne({
+        id: sessionId,
+        customer_id: customerId
       });
-      if (!session) throw new Error('Session not found or access denied');
 
-      await prisma.chat_sessions.delete({ where: { id: sessionId } });
+      if (!session) {
+        throw new Error('Session not found or access denied');
+      }
+
+      // Delete all messages in this session first
+      await Message.deleteMany({ session_id: sessionId });
+
+      // Delete the session
+      await ChatSession.deleteOne({ id: sessionId });
+
       return true;
     } catch (error) {
       console.error('Error deleting session:', error);
@@ -69,10 +88,14 @@ class ChatService {
 
   async updateSessionTitle(sessionId, title) {
     try {
-      return await prisma.chat_sessions.update({
-        where: { id: sessionId },
-        data: { title, updated_at: new Date() }
-      });
+      return await ChatSession.findOneAndUpdate(
+        { id: sessionId },
+        { 
+          title, 
+          updated_at: new Date() 
+        },
+        { new: true }
+      );
     } catch (error) {
       console.error('Error updating session title:', error);
       throw error;
@@ -81,19 +104,31 @@ class ChatService {
 
   async getSessionWithMessages(sessionId, customerId) {
     try {
-      const session = await prisma.chat_sessions.findFirst({
-        where: { id: sessionId, customer_id: customerId },
-        include: { messages: { orderBy: { created_at: 'asc' } } }
-      });
-      if (!session) throw new Error('Session not found or access denied');
-      return session;
+      const session = await ChatSession.findOne({
+        id: sessionId,
+        customer_id: customerId
+      }).lean();
+
+      if (!session) {
+        throw new Error('Session not found or access denied');
+      }
+
+      // Get messages for this session
+      const messages = await Message.find({ session_id: sessionId })
+        .sort({ created_at: 1 })
+        .lean();
+
+      return {
+        ...session,
+        messages
+      };
     } catch (error) {
       console.error('Error getting session with messages:', error);
       throw error;
     }
   }
 
-  // ---- Backward-compatibility pass-throughs (prefer using messageService directly) ----
+  // ---- Backward-compatibility pass-throughs ----
   async saveMessage(sessionId, content, sender, messageType = 'text', metadata = null) {
     return messageService.saveMessage(sessionId, content, sender, messageType, metadata);
   }
@@ -110,7 +145,7 @@ class ChatService {
     return messageService.deleteMessage(messageId, customerId);
   }
 
-  // Kept for compatibility; controllers should call aiResponseService directly or via orchestrator
+  // Kept for compatibility
   async getAIResponse(message, sessionId, options) {
     return aiResponseService.getAIResponse(message, sessionId, options);
   }

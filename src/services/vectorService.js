@@ -1,21 +1,25 @@
 // src/services/vectorService.js
-// Fixed vector service with direct PostgreSQL access for vector fields
+// MongoDB vector service with embedding support
 
-const { PrismaClient } = require('@prisma/client');
+const Product = require('../../models/Product');
 const { generateEmbedding, calculateSimilarity } = require('./embeddingService');
-const { Pool } = require('pg');
 
-const prisma = new PrismaClient();
 const DEBUG = process.env.NODE_ENV === 'development';
-
-// Create direct PostgreSQL connection for vector operations
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
 
 async function searchSimilar(query, k = 5, ownerType = 'product') {
   try {
     if (DEBUG) console.log(`[VECTOR] Searching for: ${query} k: ${k} ownerType: ${ownerType}`);
+    
+    const queryLower = query.toLowerCase().trim();
+    
+    // For menu requests, skip vector search entirely
+    if (queryLower === 'menu' || 
+        queryLower === 'view menu' || 
+        queryLower.includes('special') ||
+        queryLower.includes('show all')) {
+      if (DEBUG) console.log('[VECTOR] Menu request detected - using direct text search');
+      return await enhancedTextSearch(query, k, ownerType);
+    }
     
     // Generate embedding for the query
     const queryEmbedding = await generateEmbedding(query);
@@ -25,11 +29,12 @@ async function searchSimilar(query, k = 5, ownerType = 'product') {
       return await enhancedTextSearch(query, k, ownerType);
     }
     
+    // Rest of your existing vector search code...
     if (DEBUG) console.log('[VECTOR] Embedding generated, attempting vector search');
     
-    // Try direct PostgreSQL vector search
+    // Try MongoDB vector search
     try {
-      const vectorResults = await performDirectVectorSearch(queryEmbedding, query, k, ownerType);
+      const vectorResults = await performMongoDBVectorSearch(queryEmbedding, query, k, ownerType);
       if (vectorResults && vectorResults.length > 0) {
         if (DEBUG) console.log(`[VECTOR] Vector search returned ${vectorResults.length} results`);
         return vectorResults;
@@ -47,67 +52,76 @@ async function searchSimilar(query, k = 5, ownerType = 'product') {
   }
 }
 
-async function performDirectVectorSearch(queryEmbedding, query, k = 5, ownerType = 'product') {
-  if (DEBUG) console.log('[VECTOR] Performing direct PostgreSQL vector search');
-  
-  const client = await pool.connect();
+async function performMongoDBVectorSearch(queryEmbedding, query, k = 5, ownerType = 'product') {
+  if (DEBUG) console.log('[VECTOR] Performing MongoDB vector search');
   
   try {
-    // Get embeddings directly using native PostgreSQL
-    const embeddingQuery = `
-      SELECT 
-        id,
-        owner_type,
-        owner_id, 
-        content,
-        embedding,
-        metadata
-      FROM embeddings 
-      WHERE owner_type = $1
-    `;
+    // Get all products with embeddings
+    const products = await Product.find({
+      available: true,
+      embedding: { $exists: true, $ne: [] }
+    }).lean();
     
-    const result = await client.query(embeddingQuery, ['product']);
-    
-    if (result.rows.length === 0) {
-      if (DEBUG) console.log('[VECTOR] No embeddings found in database');
+    if (products.length === 0) {
+      if (DEBUG) console.log('[VECTOR] No products with embeddings found in database');
       return null;
     }
     
-    if (DEBUG) console.log(`[VECTOR] Retrieved ${result.rows.length} embeddings from database`);
-    
-    return await calculateSimilaritiesFromRows(result.rows, queryEmbedding, query, k);
+    if (DEBUG) console.log(`[VECTOR] Retrieved ${products.length} products with embeddings from database`);
+    // Add id field if it doesn't exist (use _id)
+    const productsWithId = products.map(p => ({
+      ...p,
+      id: p.id || p._id.toString()
+    }));
+    return await calculateSimilaritiesFromProducts(products, queryEmbedding, query, k);
     
   } catch (error) {
-    console.error('[VECTOR] Direct PostgreSQL search error:', error);
+    console.error('[VECTOR] MongoDB vector search error:', error);
     return null;
-  } finally {
-    client.release();
   }
 }
 
-async function calculateSimilaritiesFromRows(embeddingRows, queryEmbedding, query, k) {
+async function calculateSimilaritiesFromProducts(products, queryEmbedding, query, k) {
   const queryLower = query.toLowerCase().trim();
   const queryWords = queryLower.split(/\s+/).filter(word => word.length > 0);
   
   // Strict filtering setup
   const strictTerms = {
+    'soup': ['soup'],
     'tea': ['tea', 'chai'],
     'chai': ['chai', 'tea'], 
     'coffee': ['coffee'],
     'juice': ['juice', 'lassi'],
     'water': ['water'],
     'sweet': ['jamun', 'laddu', 'sweet', 'dessert', 'gulab'],
-    'dessert': ['jamun', 'laddu', 'sweet', 'dessert', 'gulab']
+    'dessert': ['jamun', 'laddu', 'sweet', 'dessert', 'gulab'],
+    'chicken': ['chicken'],
+    'rice': ['rice'],
+    'biryani': ['biryani'],
+    // ✅ ADD: Exact product name matching
+    'fried rice': ['fried rice'], // Must match exactly, not "chicken fried rice"
   };
   
   let shouldFilterStrictly = false;
   let requiredKeywords = [];
+  let isExactMatch = false;
   
-  for (const [searchTerm, keywords] of Object.entries(strictTerms)) {
-    if (queryLower === searchTerm || queryLower === searchTerm + 's') {
-      shouldFilterStrictly = true;
-      requiredKeywords = keywords;
-      break;
+  // Check for exact match first
+  if (queryLower === 'fried rice' || queryLower === 'add fried rice to cart') {
+    shouldFilterStrictly = true;
+    requiredKeywords = ['fried rice'];
+    isExactMatch = true;
+    if (DEBUG) console.log('[VECTOR] EXACT MATCH MODE: Only "Fried Rice", not "Chicken Fried Rice"');
+  }
+  // Check if query matches strict term
+  else {
+    for (const [searchTerm, keywords] of Object.entries(strictTerms)) {
+      if (queryLower.includes(searchTerm)) {
+        shouldFilterStrictly = true;
+        requiredKeywords = keywords;
+        if (DEBUG) console.log(`[VECTOR] STRICT MODE activated for: ${searchTerm}`);
+        break;
+      }
     }
   }
   
@@ -117,103 +131,72 @@ async function calculateSimilaritiesFromRows(embeddingRows, queryEmbedding, quer
   
   const similarities = [];
   
-  for (const row of embeddingRows) {
-    if (!row.owner_id) continue;
+  for (const product of products) {
+    const productId = product.id || (product._id ? product._id.toString() : null);
     
-    // Get product data
-    let product;
-    try {
-      product = await prisma.product.findUnique({
-        where: { 
-          id: row.owner_id,
-          is_available: true
-        }
-      });
-      
-      if (!product) continue;
-    } catch (error) {
-      if (DEBUG) console.log(`[VECTOR] Could not find product ${row.owner_id}`);
+    if (!productId) {
+      if (DEBUG) console.log('[VECTOR] Skipping product without ID');
       continue;
     }
     
-    // Parse the stored embedding from PostgreSQL
-    let storedEmbedding;
-    try {
-      if (DEBUG && similarities.length < 2) {
-        console.log(`[VECTOR] DEBUG - Raw embedding data for ${row.owner_id}:`);
-        console.log(`[VECTOR] embedding type: ${typeof row.embedding}`);
-        console.log(`[VECTOR] embedding constructor: ${row.embedding ? row.embedding.constructor.name : 'null'}`);
-      }
-      
-      // Handle PostgreSQL vector field - it comes as an array-like object
-      if (row.embedding) {
-        if (Array.isArray(row.embedding)) {
-          storedEmbedding = row.embedding;
-        } else if (typeof row.embedding === 'string') {
-          // Parse string format
-          const vectorText = row.embedding.trim();
-          if (vectorText.startsWith('[') && vectorText.endsWith(']')) {
-            storedEmbedding = JSON.parse(vectorText);
-          } else {
-            storedEmbedding = vectorText.split(',').map(x => parseFloat(x.trim()));
-          }
-        } else if (row.embedding.constructor === Object) {
-          // Convert object to array (common with PostgreSQL arrays)
-          storedEmbedding = Object.values(row.embedding);
-        } else {
-          // Try to convert whatever format it is
-          storedEmbedding = Array.from(row.embedding);
-        }
-      }
-      
-      if (!storedEmbedding || !Array.isArray(storedEmbedding) || storedEmbedding.length === 0) {
-        if (DEBUG) console.log(`[VECTOR] Invalid embedding format for ${row.owner_id}`);
-        continue;
-      }
-      
-      // Validate numeric values
-      if (storedEmbedding.some(val => isNaN(val))) {
-        if (DEBUG) console.log(`[VECTOR] Invalid embedding for ${row.owner_id} - contains NaN values`);
-        continue;
-      }
-      
-      if (DEBUG && similarities.length < 3) {
-        console.log(`[VECTOR] Successfully parsed embedding for ${row.owner_id}: ${storedEmbedding.length}D vector`);
-      }
-    } catch (error) {
-      if (DEBUG) console.log(`[VECTOR] Failed to parse embedding for ${row.owner_id}:`, error.message);
+    if (!product.embedding || !Array.isArray(product.embedding) || product.embedding.length === 0) {
+      if (DEBUG) console.log(`[VECTOR] Product ${product.name} has no embedding, skipping`);
       continue;
+    }
+    
+    if (DEBUG && similarities.length < 3) {
+      console.log(`[VECTOR] Processing product: ${product.name} with ${product.embedding.length}D embedding`);
     }
     
     // Calculate similarity
-    const similarity = calculateSimilarity(queryEmbedding, storedEmbedding);
+    const similarity = calculateSimilarity(queryEmbedding, product.embedding);
     let boostedSimilarity = similarity;
     
     // Apply strict filtering
     if (shouldFilterStrictly) {
-      const productText = `${product.name} ${product.description} ${product.category}`.toLowerCase();
+      const productText = product.name.toLowerCase();
       
-      let hasRequiredKeyword = false;
-      for (const keyword of requiredKeywords) {
-        if (productText.includes(keyword)) {
-          hasRequiredKeyword = true;
-          break;
+      // ✅ FIX: For exact match, exclude products with extra words
+      if (isExactMatch) {
+        // If looking for "fried rice", exclude "chicken fried rice"
+        if (productText === 'fried rice') {
+          boostedSimilarity += 0.5;
+          if (DEBUG) console.log(`[VECTOR] EXACT MATCH CONFIRMED: "${product.name}"`);
+        } else if (productText.includes('fried rice')) {
+          // Contains "fried rice" but has other words - filter out
+          if (DEBUG) console.log(`[VECTOR] FILTERED OUT: "${product.name}" - contains extra words`);
+          continue;
+        } else {
+          if (DEBUG) console.log(`[VECTOR] FILTERED OUT: "${product.name}" - doesn't match "fried rice"`);
+          continue;
         }
+      } else {
+        // Normal strict mode
+        let hasRequiredKeyword = false;
+        for (const keyword of requiredKeywords) {
+          if (productText.includes(keyword)) {
+            hasRequiredKeyword = true;
+            break;
+          }
+        }
+        
+        if (!hasRequiredKeyword) {
+          if (DEBUG) console.log(`[VECTOR] FILTERED OUT: "${product.name}" - doesn't contain required keywords`);
+          continue;
+        }
+        
+        boostedSimilarity += 0.3;
+        if (DEBUG) console.log(`[VECTOR] STRICT MATCH CONFIRMED: "${product.name}"`);
       }
-      
-      if (!hasRequiredKeyword) {
-        if (DEBUG) console.log(`[VECTOR] FILTERED OUT: "${product.name}" - doesn't contain required keywords`);
-        continue;
-      }
-      
-      boostedSimilarity += 0.3;
-      if (DEBUG) console.log(`[VECTOR] STRICT MATCH CONFIRMED: "${product.name}"`);
     }
     
     // Apply exact match boosting
-    if (product.name?.toLowerCase().includes(queryLower)) {
+    if (product.name?.toLowerCase() === queryLower) {
+      boostedSimilarity += 0.3;
+      if (DEBUG) console.log(`[VECTOR] PERFECT NAME MATCH: "${product.name}"`);
+    } else if (product.name?.toLowerCase().includes(queryLower)) {
       boostedSimilarity += 0.2;
-      if (DEBUG) console.log(`[VECTOR] EXACT MATCH BOOST: "${product.name}"`);
+      if (DEBUG) console.log(`[VECTOR] NAME CONTAINS QUERY: "${product.name}"`);
     }
     
     // Word match boosting
@@ -233,11 +216,12 @@ async function calculateSimilaritiesFromRows(embeddingRows, queryEmbedding, quer
     
     if (boostedSimilarity > 0.1 || similarity > 0.3) {
       similarities.push({
-        id: product.id,
+        id: productId,
         name: product.name,
         price: parseFloat(product.price || 0),
-        description: product.description,
-        category: product.category,
+        description: product.description || '',
+        category: product.category || '',
+        image: product.image || product.imageUrl || '',
         similarity: Math.min(1.0, boostedSimilarity),
         originalSimilarity: similarity
       });
@@ -258,7 +242,6 @@ async function calculateSimilaritiesFromRows(embeddingRows, queryEmbedding, quer
   
   return results;
 }
-
 // Enhanced text search fallback
 async function enhancedTextSearch(query, k = 5, ownerType = 'product') {
   try {
@@ -267,99 +250,61 @@ async function enhancedTextSearch(query, k = 5, ownerType = 'product') {
     if (ownerType === 'product') {
       const queryLower = query.toLowerCase().trim();
       
-      // Enhanced semantic keyword mapping
-      const semanticMappings = {
-        'tea': ['tea', 'chai', 'masala chai'],
-        'chai': ['chai', 'tea', 'masala chai'],
-        'coffee': ['coffee'],
-        'juice': ['juice', 'lassi', 'mango lassi'],
-        'water': ['water', 'bottle'],
-        'sweet': ['jamun', 'laddu', 'sweet', 'dessert', 'gulab', 'jaggery'],
-        'dessert': ['jamun', 'laddu', 'sweet', 'dessert', 'gulab', 'jaggery'],
-        'spicy': ['masala', 'chilli', 'spicy', 'tikka', 'curry'],
-        'curry': ['curry', 'masala', 'korma', 'tikka', 'dal', 'palak'],
-        'rice': ['rice', 'biryani', 'fried rice', 'basmati'],
-        'bread': ['roti', 'naan', 'paratha', 'bread'],
-        'snack': ['samosa', 'cutlet', 'fries', 'bhel', 'chaat'],
-        'chicken': ['chicken'],
-        'paneer': ['paneer'],
-        'goat': ['goat'],
-        'veg': ['veg', 'vegetarian'],
-        'menu': ['*']
-      };
-      
-      let searchTerms = [queryLower];
-      let isMenuRequest = false;
-      
-      for (const [key, mappedTerms] of Object.entries(semanticMappings)) {
-        if (queryLower === key || queryLower === key + 's' || queryLower.includes(key)) {
-          if (mappedTerms.includes('*')) {
-            isMenuRequest = true;
-            break;
-          }
-          searchTerms = mappedTerms;
-          break;
-        }
-      }
+      // Check if this is a menu request
+      const isMenuRequest = queryLower === 'menu' || 
+                           queryLower === 'view menu' ||
+                           queryLower.includes('special');
       
       if (isMenuRequest) {
-        const menuItems = await prisma.product.findMany({
-          where: {
-            is_available: true,
-            OR: [
-              { name: { contains: 'combo', mode: 'insensitive' } },
-              { name: { contains: 'platter', mode: 'insensitive' } },
-              { name: { contains: 'biryani', mode: 'insensitive' } },
-              { name: { contains: 'samosa', mode: 'insensitive' } },
-              { name: { contains: 'roti', mode: 'insensitive' } },
-              { name: { contains: 'paneer', mode: 'insensitive' } },
-              { name: { contains: 'chicken', mode: 'insensitive' } }
-            ]
-          },
-          take: k
-        });
+        if (DEBUG) console.log('[VECTOR] Menu request - fetching ALL products');
         
+        const menuItems = await Product.find({ available: true })
+          .limit(50)
+          .lean();
+        
+        if (DEBUG) console.log(`[VECTOR] Found ${menuItems.length} total menu items`);
+        
+        // ✅ FIX: Convert _id to id string
         return menuItems.map(p => ({
-          id: p.id,
+          id: p._id.toString(), // ✅ Always convert _id to string
           name: p.name,
           price: parseFloat(p.price || 0),
-          description: p.description,
-          category: p.category,
+          description: p.description || '',
+          category: p.category || 'Main Course',
+          image: p.image || p.imageUrl || '',
           similarity: 0.9
         }));
       }
       
-      // Regular search
-      const whereConditions = searchTerms.map(term => ({
-        OR: [
-          { name: { contains: term, mode: 'insensitive' } },
-          { description: { contains: term, mode: 'insensitive' } },
-          { category: { contains: term, mode: 'insensitive' } }
+      // Text-based search for non-menu queries
+      const textQuery = {
+        available: true,
+        $or: [
+          { name: new RegExp(query, 'i') },
+          { description: new RegExp(query, 'i') },
+          { category: new RegExp(query, 'i') }
         ]
-      }));
+      };
       
-      const products = await prisma.product.findMany({
-        where: {
-          AND: [
-            { is_available: true },
-            { OR: whereConditions }
-          ]
-        },
-        take: k
-      });
+      const products = await Product.find(textQuery)
+        .limit(k)
+        .lean();
       
+      if (DEBUG) console.log(`[VECTOR] Text search found ${products.length} products`);
+      
+      // ✅ FIX: Convert _id to id string
       return products.map(p => ({
-        id: p.id,
+        id: p._id.toString(), // ✅ Always convert _id to string
         name: p.name,
         price: parseFloat(p.price || 0),
-        description: p.description,
-        category: p.category,
+        description: p.description || '',
+        category: p.category || 'Main Course',
+        image: p.image || p.imageUrl || '',
         similarity: 0.8
       }));
     }
     
     return [];
-    
   } catch (error) {
     console.error('[VECTOR] Enhanced text search error:', error);
     return [];
@@ -367,19 +312,24 @@ async function enhancedTextSearch(query, k = 5, ownerType = 'product') {
 }
 
 if (DEBUG) {
-  console.log('[VECTOR] Direct PostgreSQL vector search service loaded');
+  console.log('[VECTOR] MongoDB vector search service loaded');
   
-  // Test PostgreSQL connection
-  pool.connect().then(client => {
-    client.query('SELECT COUNT(*) FROM embeddings WHERE owner_type = $1', ['product'])
-      .then(result => {
-        console.log(`[VECTOR] Found ${result.rows[0].count} product embeddings via direct PostgreSQL connection`);
-        client.release();
-      })
-      .catch(error => {
-        console.log('[VECTOR] PostgreSQL connection test failed:', error.message);
-        client.release();
-      });
+  // Test MongoDB connection for all products
+  Product.countDocuments({ available: true })
+  .then(count => {
+    console.log(`[VECTOR] Found ${count} available products in MongoDB`);
+    
+    // Also check for products with embeddings
+    return Product.countDocuments({ 
+      available: true, 
+      embedding: { $exists: true, $ne: [] } 
+    });
+  })
+  .then(embeddingCount => {
+    console.log(`[VECTOR] Found ${embeddingCount} products with embeddings`);
+  })
+  .catch(error => {
+    console.log('[VECTOR] MongoDB connection test failed:', error.message);
   });
 }
 

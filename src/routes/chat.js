@@ -1,48 +1,136 @@
+// src/routes/chat.js
 const express = require('express');
-const AgentController = require('../controllers/agentController');
-
 const router = express.Router();
+const agentService = require('../services/agentService');
+const ChatSession = require('../../models/ChatSession');
+const { v4: uuidv4 } = require('uuid');
 
-router.post('/chat', AgentController.chat);
-router.post('/reindex', AgentController.reindex);
+// Health check
+router.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok',
+    service: 'chat'
+  });
+});
 
+// REST endpoint for chat messages
+router.post('/chat', async (req, res) => {
+  try {
+    const { customerId, message } = req.body;
 
-// ---------------------
-// Chat Session Routes
-// ---------------------
+    if (!customerId || !message) {
+      return res.status(400).json({ 
+        error: 'customerId and message are required' 
+      });
+    }
 
-// Create a new chat session
-// router.post('/sessions', chatController.createSession);
+    console.log(`[Chat API] Message from ${customerId}: ${message}`);
 
-// Get all chat sessions for a customer
-// router.get('/sessions', chatController.getSessions);
+    // Process message through agent
+    const response = await agentService.processMessage(customerId, message);
 
-// // Get a single session with messages
-// router.get('/sessions/:sessionId/details', chatController.getSessionWithMessages);
+    res.json({
+      success: true,
+      text: response.aiText,
+      intent: response.intent,
+      products: response.productList || [],
+      cart: response.cartData || null,
+      orderData: response.orderData || null,
+      payment: response.payment || null,
+      suggestions: response.meta?.suggestions || [],
+      timestamp: response.meta?.timestamp || new Date().toISOString()
+    });
 
-// // Update session title
-// router.put('/sessions/:sessionId/title', chatController.updateSessionTitle);
+  } catch (error) {
+    console.error('[Chat API] Error:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: error.message 
+    });
+  }
+});
 
-// // Delete a chat session
-// router.delete('/sessions/:sessionId', chatController.deleteSession);
+// Create new chat session
+router.post('/sessions', async (req, res) => {
+  try {
+    const { customerId } = req.body;
 
-// // ---------------------
-// // Message Routes
-// // ---------------------
+    if (!customerId) {
+      return res.status(400).json({ error: 'customerId is required' });
+    }
 
-// // Send a new message (user -> AI)
-// router.post('/messages', chatController.sendMessage);
+    const sessionId = uuidv4();
 
-// // Get all messages in a session
-// router.get('/messages/:sessionId', chatController.getMessages);
+    const session = await ChatSession.create({
+      session_id: sessionId,
+      customer_id: customerId,
+      created_at: new Date(),
+      updated_at: new Date(),
+      messages: []
+    });
 
-// // Update a specific message
-// router.put('/messages/:messageId', messageController.updateMessage);
+    res.json({
+      success: true,
+      sessionId: session.session_id
+    });
 
-// // Delete a specific message
-// router.delete('/messages/:messageId', messageController.deleteMessage);
+  } catch (error) {
+    console.error('[Chat API] Create session error:', error);
+    res.status(500).json({ error: 'Failed to create session' });
+  }
+});
 
-// // Get message history for a session with optional limit/offset
-// router.get('/messages/history/:sessionId', messageController.getMessageHistory);
+// Get all sessions for a customer
+router.get('/sessions', async (req, res) => {
+  try {
+    const { customerId } = req.query;
+
+    if (!customerId) {
+      return res.status(400).json({ error: 'customerId is required' });
+    }
+
+    const sessions = await ChatSession.find({ customer_id: customerId })
+      .sort({ updated_at: -1 })
+      .limit(10)
+      .lean();
+
+    res.json({
+      success: true,
+      sessions: sessions.map(s => ({
+        sessionId: s.session_id,
+        createdAt: s.created_at,
+        updatedAt: s.updated_at,
+        messageCount: s.messages?.length || 0
+      }))
+    });
+
+  } catch (error) {
+    console.error('[Chat API] Get sessions error:', error);
+    res.status(500).json({ error: 'Failed to fetch sessions' });
+  }
+});
+
+// Get chat history for a session
+router.get('/sessions/:sessionId/messages', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await ChatSession.findOne({ session_id: sessionId }).lean();
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json({
+      success: true,
+      sessionId: session.session_id,
+      messages: session.messages || []
+    });
+
+  } catch (error) {
+    console.error('[Chat API] Get history error:', error);
+    res.status(500).json({ error: 'Failed to fetch chat history' });
+  }
+});
 
 module.exports = router;

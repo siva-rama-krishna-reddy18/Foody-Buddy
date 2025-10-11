@@ -1,38 +1,44 @@
-// controllers/orderController.js
-const { PrismaClient } = require('@prisma/client');
+// src/controllers/orderController.js
+const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
-const prisma = new PrismaClient();
+const Cart = require('../../models/Cart');
+const CartItem = require('../../models/CartItem');
+const Product = require('../../models/Product');
+const Order = require('../../models/Order');
 
 class OrderController {
   // Automatic order status progression
   static async simulateOrderProgress(orderNumber) {
-  const statuses = ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY', 'DELIVERED'];
-  let currentIndex = 0;
-  
-  console.log(`[Order] Starting automatic progression for order ${orderNumber}`);
-  
-  const interval = setInterval(async () => {
-    if (currentIndex >= statuses.length) {
-      console.log(`[Order] Order ${orderNumber} progression complete - DELIVERED`);
-      clearInterval(interval);
-      return;
-    }
+    const statuses = ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY', 'DELIVERED'];
+    let currentIndex = 0;
     
-    try {
-      const result = await prisma.order.update({
-        where: { orderNumber: parseInt(orderNumber) },
-        data: { status: statuses[currentIndex] }
-      });
+    console.log(`[Order] Starting automatic progression for order ${orderNumber}`);
+    
+    const interval = setInterval(async () => {
+      if (currentIndex >= statuses.length) {
+        console.log(`[Order] Order ${orderNumber} progression complete - DELIVERED`);
+        clearInterval(interval);
+        return;
+      }
       
-      console.log(`[Order] Order ${orderNumber} status updated to: ${statuses[currentIndex]}`);
-      console.log('[Order] Update result:', result); // Add this line
-      currentIndex++;
-    } catch (error) {
-      console.error(`[Order] Status update failed for ${orderNumber}:`, error);
-      clearInterval(interval);
-    }
-  }, 5000); // Reduced to 5 seconds for faster demo
-}
+      try {
+        const result = await Order.findOneAndUpdate(
+          { order_number: orderNumber },
+          { status: statuses[currentIndex] },
+          { new: true }
+        );
+        
+        if (result) {
+          console.log(`[Order] Order ${orderNumber} status updated to: ${statuses[currentIndex]}`);
+          console.log('[Order] Update result:', result);
+        }
+        currentIndex++;
+      } catch (error) {
+        console.error(`[Order] Status update failed for ${orderNumber}:`, error);
+        clearInterval(interval);
+      }
+    }, 5000); // 5 seconds for faster demo
+  }
 
   // Place a new order
   static async placeOrder(req, res) {
@@ -51,14 +57,10 @@ class OrderController {
       const orderItems = [];
 
       // Find customer's cart for clearing after order
-      const cart = await prisma.carts.findFirst({
-        where: { customer_id: customerId }
-      });
+      const cart = await Cart.findOne({ customer_id: customerId });
 
       for (const item of items) {
-        const product = await prisma.product.findUnique({
-          where: { id: item.productId }
-        });
+        const product = await Product.findOne({ id: item.productId });
 
         if (!product) {
           return res.status(404).json({
@@ -71,71 +73,46 @@ class OrderController {
         totalAmount += itemTotal;
 
         orderItems.push({
-          productId: item.productId,
+          product: product.name,
+          price: product.price.toString(),
           quantity: item.quantity,
-          price: parseFloat(product.price)
+          specialInstructions: item.specialInstructions || ''
         });
       }
 
       // Generate order number
       const orderNumber = Math.floor(10000 + Math.random() * 90000);
 
-      // Create order with proper field mapping
-      const order = await prisma.order.create({
-        data: {
-          orderNumber: orderNumber,
-          amount: totalAmount,
-          createdAt: new Date(),
-          status: 'PENDING',
-          paymentMethod: paymentMethod || 'CASH',
-          customerId: customerId, // Ensure correct field name
-          orderLineItems: {
-            create: orderItems
-          }
-        },
-        include: {
-          orderLineItems: true
-        }
+      // Create order
+      const order = await Order.create({
+        _id: new mongoose.Types.ObjectId(),
+        order_number: orderNumber,
+        amount: totalAmount.toString(),
+        created_at: new Date().toISOString(),
+        currency: 'USD',
+        date: new Date().toISOString(),
+        group_id: customerId,
+        line_items: orderItems,
+        payment_method: paymentMethod || 'CASH',
+        status: 'PENDING',
+        orderNumberProvisional: orderNumber
       });
 
-      // Add this to your main server file after the server starts
-async function startProgressionForPendingOrders() {
-  try {
-    const pendingOrders = await prisma.order.findMany({
-      where: { status: 'PENDING' },
-      select: { orderNumber: true }
-    });
-    
-    console.log(`[Server] Found ${pendingOrders.length} pending orders, starting progression...`);
-    
-    pendingOrders.forEach(order => {
-      OrderController.simulateOrderProgress(order.orderNumber);
-    });
-  } catch (error) {
-    console.error('Failed to start progression for pending orders:', error);
-  }
-}
-
-// Call this after server startup
-setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after server start
-
       // Start automatic status progression
-      OrderController.simulateOrderProgress(order.orderNumber);
-      console.log(`[Order] Started auto-progression for order ${order.orderNumber}`);
+      OrderController.simulateOrderProgress(order.order_number);
+      console.log(`[Order] Started auto-progression for order ${order.order_number}`);
 
       // Clear cart after successful order
       if (cart) {
-        await prisma.cartItem.deleteMany({
-          where: { cart_id: cart.id }
-        });
+        await CartItem.deleteMany({ cart_id: cart.id });
         console.log(`[Order] Cart cleared for customer ${customerId}`);
       }
 
       res.json({
         success: true,
         data: {
-          orderId: order.orderNumber, // Use orderNumber as ID
-          orderNumber: order.orderNumber,
+          orderId: order.order_number,
+          orderNumber: order.order_number,
           totalAmount,
           status: order.status,
           estimatedDelivery: '30-45 minutes',
@@ -158,29 +135,20 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
       const { customerId } = req.params;
       const { limit = 10, offset = 0 } = req.query;
 
-      // Try to get orders with proper field mapping
-      const orders = await prisma.order.findMany({
-        where: {
-          customerId: customerId // Use correct field name
-        },
-        orderBy: { createdAt: 'desc' },
-        take: parseInt(limit),
-        skip: parseInt(offset),
-        include: {
-          orderLineItems: {
-            take: 3 // Limit items per order for summary
-          }
-        }
-      });
+      const orders = await Order.find({ group_id: customerId })
+        .sort({ created_at: -1 })
+        .limit(parseInt(limit))
+        .skip(parseInt(offset))
+        .lean();
 
       res.json({
         success: true,
         data: orders.map(order => ({
-          orderNumber: order.orderNumber,
+          orderNumber: order.order_number,
           amount: order.amount,
           status: order.status,
-          createdAt: order.createdAt,
-          itemCount: order.orderLineItems?.length || 0
+          createdAt: order.created_at,
+          itemCount: order.line_items?.length || 0
         }))
       });
 
@@ -199,26 +167,7 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
     try {
       const { orderId } = req.params;
 
-      // Try orderNumber first (most likely primary key)
-      let order = null;
-      
-      try {
-        order = await prisma.order.findUnique({
-          where: { orderNumber: parseInt(orderId) },
-          include: {
-            orderLineItems: true
-          }
-        });
-      } catch (error1) {
-        // If orderNumber fails, try other possible fields
-        console.log('[Order] Trying alternative order lookup');
-        
-        // Skip direct ID lookup since it's not available in this schema
-        return res.status(404).json({
-          success: false,
-          error: 'Order not found'
-        });
-      }
+      const order = await Order.findOne({ order_number: parseInt(orderId) }).lean();
 
       if (!order) {
         return res.status(404).json({
@@ -241,7 +190,7 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
     }
   }
 
-  // Update order status (can be used for manual override)
+  // Update order status
   static async updateOrderStatus(req, res) {
     try {
       const { orderId } = req.params;
@@ -256,10 +205,18 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
         });
       }
 
-      const order = await prisma.order.update({
-        where: { orderNumber: parseInt(orderId) },
-        data: { status }
-      });
+      const order = await Order.findOneAndUpdate(
+        { order_number: parseInt(orderId) },
+        { status },
+        { new: true }
+      );
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          error: 'Order not found'
+        });
+      }
 
       console.log(`[Order] Manual status update: Order ${orderId} → ${status}`);
 
@@ -282,9 +239,7 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
     try {
       const { orderId } = req.params;
 
-      const order = await prisma.order.findUnique({
-        where: { orderNumber: parseInt(orderId) }
-      });
+      const order = await Order.findOne({ order_number: parseInt(orderId) });
 
       if (!order) {
         return res.status(404).json({
@@ -300,16 +255,14 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
         });
       }
 
-      const cancelledOrder = await prisma.order.update({
-        where: { orderNumber: parseInt(orderId) },
-        data: { status: 'CANCELLED' }
-      });
+      order.status = 'CANCELLED';
+      await order.save();
 
       console.log(`[Order] Order ${orderId} cancelled`);
 
       res.json({
         success: true,
-        data: cancelledOrder
+        data: order
       });
 
     } catch (error) {
@@ -334,9 +287,7 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
       }
 
       // Check if product exists
-      const product = await prisma.product.findUnique({
-        where: { id: productId }
-      });
+      const product = await Product.findOne({ id: productId });
 
       if (!product) {
         return res.status(404).json({
@@ -345,57 +296,46 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
         });
       }
 
-      // First, find or create a cart for this customer
-      let cart = await prisma.carts.findFirst({
-        where: { customer_id: customerId }
-      });
+      // Find or create cart
+      let cart = await Cart.findOne({ customer_id: customerId });
 
       if (!cart) {
-        // Create a new cart for the customer
-        cart = await prisma.carts.create({
-          data: {
-            id: uuidv4(),
-            customer_id: customerId,
-            created_at: new Date(),
-            updated_at: new Date()
-          }
+        cart = await Cart.create({
+          id: uuidv4(),
+          customer_id: customerId,
+          session_id: uuidv4(),
+          status: 'OPEN',
+          created_at: new Date(),
+          updated_at: new Date()
         });
       }
 
       // Check if item already in cart
-      const existingItem = await prisma.cartItem.findFirst({
-        where: {
-          cart_id: cart.id,
-          productId: productId
-        }
+      const existingItem = await CartItem.findOne({
+        cart_id: cart.id,
+        productId: productId
       });
 
       let cartItem;
 
       if (existingItem) {
         // Update quantity
-        cartItem = await prisma.cartItem.update({
-          where: { id: existingItem.id },
-          data: { 
-            quantity: existingItem.quantity + quantity,
-            title: product.name, // Ensure name is set
-            unit_price: parseFloat(product.price), // Ensure price is set
-            updated_at: new Date()
-          }
-        });
+        existingItem.quantity += quantity;
+        existingItem.title = product.name;
+        existingItem.unit_price = parseFloat(product.price);
+        existingItem.updated_at = new Date();
+        cartItem = await existingItem.save();
       } else {
         // Add new item
-        cartItem = await prisma.cartItem.create({
-          data: {
-            id: uuidv4(),
-            cart_id: cart.id,
-            productId: productId,
-            title: product.name,
-            unit_price: parseFloat(product.price),
-            quantity: quantity,
-            created_at: new Date(),
-            updated_at: new Date()
-          }
+        cartItem = await CartItem.create({
+          id: uuidv4(),
+          cart_id: cart.id,
+          productId: productId,
+          title: product.name,
+          unit_price: parseFloat(product.price),
+          quantity: quantity,
+          created_at: new Date(),
+          updated_at: new Date()
         });
       }
 
@@ -418,10 +358,7 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
     try {
       const { customerId } = req.params;
 
-      // First, find the cart for this customer
-      const cart = await prisma.carts.findFirst({
-        where: { customer_id: customerId }
-      });
+      const cart = await Cart.findOne({ customer_id: customerId });
 
       if (!cart) {
         return res.json({
@@ -434,10 +371,7 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
         });
       }
 
-      // Get cart items
-      const cartItems = await prisma.cartItem.findMany({
-        where: { cart_id: cart.id }
-      });
+      const cartItems = await CartItem.find({ cart_id: cart.id }).lean();
 
       // Enrich items with product data if missing
       const enrichedItems = [];
@@ -445,12 +379,9 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
         let finalName = item.title;
         let finalPrice = item.unit_price;
 
-        // Fetch product data if missing
         if (!finalName || !finalPrice) {
           try {
-            const product = await prisma.product.findUnique({
-              where: { id: item.productId }
-            });
+            const product = await Product.findOne({ id: item.productId });
             if (product) {
               finalName = finalName || product.name;
               finalPrice = finalPrice || parseFloat(product.price);
@@ -492,79 +423,36 @@ setTimeout(startProgressionForPendingOrders, 5000); // Wait 5 seconds after serv
   }
 
   // Update cart item quantity
-static async updateCartItem(req, res) {
-  try {
-    const { customerId, productId, quantity, cartItemId } = req.body;
-
-    if (quantity <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Quantity must be greater than 0'
-      });
-    }
-
-    // If cartItemId is provided, use it directly
-    if (cartItemId) {
-      const cartItem = await prisma.cartItem.update({
-        where: { id: cartItemId },
-        data: { 
-          quantity,
-          updated_at: new Date()
-        }
-      });
-
-      return res.json({
-        success: true,
-        data: cartItem
-      });
-    }
-
-    // Otherwise, find by customer and product
-    const cart = await prisma.carts.findFirst({
-      where: { customer_id: customerId }
-    });
-
-    if (!cart) {
-      return res.status(404).json({
-        success: false,
-        error: 'Cart not found'
-      });
-    }
-
-    const cartItem = await prisma.cartItem.updateMany({
-      where: {
-        cart_id: cart.id,
-        productId: productId
-      },
-      data: { 
-        quantity,
-        updated_at: new Date()
-      }
-    });
-
-    res.json({
-      success: true,
-      data: cartItem
-    });
-
-  } catch (error) {
-    console.error('Update cart item error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to update cart item'
-    });
-  }
-}
-
-  // Remove item from cart
-  static async removeFromCart(req, res) {
+  static async updateCartItem(req, res) {
     try {
-      const { customerId, productId } = req.params;
+      const { customerId, productId, quantity, cartItemId } = req.body;
 
-      // Find customer's cart
-      const cart = await prisma.carts.findFirst({
-        where: { customer_id: customerId }
-      });
+      if (quantity <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Quantity must be greater than 0'
+        });
+      }
+
+      // If cartItemId is provided, use it directly
+      if (cartItemId) {
+        const cartItem = await CartItem.findOneAndUpdate(
+          { id: cartItemId },
+          { 
+            quantity,
+            updated_at: new Date()
+          },
+          { new: true }
+        );
+
+        return res.json({
+          success: true,
+          data: cartItem
+        });
+      }
+
+      // Otherwise, find by customer and product
+      const cart = await Cart.findOne({ customer_id: customerId });
 
       if (!cart) {
         return res.status(404).json({
@@ -573,11 +461,49 @@ static async updateCartItem(req, res) {
         });
       }
 
-      await prisma.cartItem.deleteMany({
-        where: {
+      const cartItem = await CartItem.findOneAndUpdate(
+        {
           cart_id: cart.id,
           productId: productId
-        }
+        },
+        { 
+          quantity,
+          updated_at: new Date()
+        },
+        { new: true }
+      );
+
+      res.json({
+        success: true,
+        data: cartItem
+      });
+
+    } catch (error) {
+      console.error('Update cart item error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to update cart item'
+      });
+    }
+  }
+
+  // Remove item from cart
+  static async removeFromCart(req, res) {
+    try {
+      const { customerId, productId } = req.params;
+
+      const cart = await Cart.findOne({ customer_id: customerId });
+
+      if (!cart) {
+        return res.status(404).json({
+          success: false,
+          error: 'Cart not found'
+        });
+      }
+
+      await CartItem.deleteMany({
+        cart_id: cart.id,
+        productId: productId
       });
 
       res.json({
@@ -599,10 +525,7 @@ static async updateCartItem(req, res) {
     try {
       const { customerId } = req.params;
 
-      // Find customer's cart
-      const cart = await prisma.carts.findFirst({
-        where: { customer_id: customerId }
-      });
+      const cart = await Cart.findOne({ customer_id: customerId });
 
       if (!cart) {
         return res.status(404).json({
@@ -611,9 +534,7 @@ static async updateCartItem(req, res) {
         });
       }
 
-      await prisma.cartItem.deleteMany({
-        where: { cart_id: cart.id }
-      });
+      await CartItem.deleteMany({ cart_id: cart.id });
 
       res.json({
         success: true,
@@ -629,5 +550,23 @@ static async updateCartItem(req, res) {
     }
   }
 }
+
+// Start progression for pending orders on server startup
+async function startProgressionForPendingOrders() {
+  try {
+    const pendingOrders = await Order.find({ status: 'PENDING' }).select('order_number');
+    
+    console.log(`[Server] Found ${pendingOrders.length} pending orders, starting progression...`);
+    
+    pendingOrders.forEach(order => {
+      OrderController.simulateOrderProgress(order.order_number);
+    });
+  } catch (error) {
+    console.error('Failed to start progression for pending orders:', error);
+  }
+}
+
+// Export the startup function
+OrderController.startProgressionForPendingOrders = startProgressionForPendingOrders;
 
 module.exports = OrderController;

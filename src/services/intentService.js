@@ -5,135 +5,108 @@ async function classifyIntent(message) {
   try {
     const lowerMessage = message.toLowerCase().trim();
     
-    // Greeting patterns
-    if (/^(hi|hello|hey|good morning|good evening|greetings)/.test(lowerMessage)) {
-      return 'GREETING';
+    // FR01: Order Search by Number - HIGHEST PRIORITY
+    if (/\b(order|#)\s*\d{4,}\b/i.test(message) || /\blook.*up.*order\b/i.test(lowerMessage)) {
+      return 'TRACK_ORDER';
     }
     
-    // Fix the coupon verification pattern - make it more specific
-if (/\b(was.*coupon.*used|coupon.*used|any.*coupon.*used|check.*coupon.*usage)\b.*\b(order|#)\s*\d+\b/.test(lowerMessage) ||
-    /\b(order|#)\s*\d+\b.*\b(coupon.*used|used.*coupon)\b/.test(lowerMessage)) {
-  return 'VERIFY_COUPON_USAGE';
-}
-
-// Keep the general coupon pattern AFTER the specific one
-if (/\b(coupon|coupons|discount|discounts|promo|promo code|offer|offers|deal|deals)\b/.test(lowerMessage)) {
-  return 'VIEW_COUPONS';
-
-}
-
-// Make the payment success pattern more flexible
-if (/\b(payment.*completed|payment.*successful|payment.*success|order.*placed|payment.*done)\b/.test(lowerMessage)) {
-  return 'PAYMENT_SUCCESS';
-}
-
-// Payment/Checkout patterns (check before other patterns)
-    if (/\b(checkout|pay|payment|proceed.*pay|place.*order|complete.*order|pay.*now|make.*payment)\b/.test(lowerMessage)) {
-      return 'CHECKOUT';
-    }
-    
-    // Cart quantity update patterns (ADD THESE BEFORE OTHER PATTERNS)
-    if (/\b(increase|decrease).*quantity/.test(lowerMessage)) {
-      return 'UPDATE_CART_QUANTITY';
-    }
-
-    if (/\bremove.*from.*cart/.test(lowerMessage)) {
-      return 'REMOVE_FROM_CART';
-    }
-    
-    // Customer Information Query patterns - MOST SPECIFIC FIRST
-/*if (/\b(give me|get|what.*is|tell me|show me)\b.*\b(email|phone|address|customer.*info|contact.*info|customer.*details)\b.*\b(order|#)\s*\d+\b/.test(lowerMessage) ||
-    /\b(email|phone|address|customer.*info|contact.*info|customer.*details)\b.*\b(order|#)\s*\d+\b/.test(lowerMessage)) {
-  return 'GET_CUSTOMER_INFO';
-}
-*/
-
-// Coupon verification patterns - SPECIFIC
-if (/\b(was.*coupon|coupon.*used|any.*coupon|check.*coupon)\b.*\b(order|#)\s*\d+\b/.test(lowerMessage) ||
-    /\b(order|#)\s*\d+\b.*\b(coupon|discount)\b/.test(lowerMessage)) {
-  return 'VERIFY_COUPON_USAGE';
-}
-
-
-// Customer search patterns - SPECIFIC
-if (/\b(find.*order.*for|latest.*order.*for|search.*orders.*for|search.*customer)\b/.test(lowerMessage) ||
-    /@/.test(lowerMessage) ||
-    /\+?\d{10,}/.test(lowerMessage)) { // Phone number pattern
-  return 'SEARCH_BY_CUSTOMER';
-}
-
-// Provisional order patterns - SPECIFIC
-if (/\b(provisional.*order|temp.*order)\b/.test(lowerMessage)) {
-  return 'TRACK_PROVISIONAL_ORDER';
-}
-
-if (/\b(any.*special.*instruction|special.*instruction|instruction.*for.*order|special.*request|note.*for.*order)\b/.test(lowerMessage)) {
-  return 'GET_SPECIAL_INSTRUCTIONS';
-}
-
-// GENERAL ORDER TRACKING (place AFTER specific patterns)
-if (/\b(track|tracking|check|status|where.*is)\b.*\b(order|#)\s*\d+\b/.test(lowerMessage) ||
-    /\border\s*\d+\b/.test(lowerMessage) ||
-    /\b\d{3,}\b.*\b(order|status|track)\b/.test(lowerMessage)) {
-  return 'TRACK_ORDER';
-}
-    
-    // Order status patterns (general history)
-    if (/\b(order|orders|recent|history|status)\b/.test(lowerMessage) &&
-        !/\b\d{3,}\b/.test(lowerMessage)) {
+    // FR02: Get Order Status
+    if (/\b(status|track).*\border\b/i.test(lowerMessage) || 
+        /\border.*\b(status|tracking)\b/i.test(lowerMessage)) {
       return 'ORDER_STATUS';
     }
     
-    // Add to cart patterns (VERY SPECIFIC)
-    if (/\b(add\s+.+\s+to\s+cart|add\s+.+\s+cart|put\s+.+\s+in\s+cart)\b/.test(lowerMessage)) {
+    // FR03: Query Order Items
+    if (/\b(what.*in|items.*in|products.*in|contents.*of).*\border\b/i.test(lowerMessage)) {
+      return 'TRACK_ORDER';
+    }
+    
+    // FR04: Verify Amount and Payment
+    if (/\b(amount|paid|payment|cost|price|total).*\border\b/i.test(lowerMessage) ||
+        /\border.*\b(amount|paid|payment|cost)\b/i.test(lowerMessage)) {
+      return 'TRACK_ORDER';
+    }
+    
+    // FR05: Get Special Instructions
+    if (/\b(special.*instruction|instruction|note|request).*\border\b/i.test(lowerMessage) ||
+        /\border.*\b(instruction|note|special)\b/i.test(lowerMessage)) {
+      return 'GET_SPECIAL_INSTRUCTIONS';
+    }
+    
+    // FR06: Query Customer Information
+    if (/\b(customer.*info|email|phone|address).*\border\b/i.test(lowerMessage) ||
+        /\bget.*\b(email|phone|contact|address)\b/i.test(lowerMessage)) {
+      return 'GET_CUSTOMER_INFO';
+    }
+    
+    // FR07: Verify Coupon Usage
+    if (/\b(coupon|discount|promo).*\b(used|applied)\b/i.test(lowerMessage) ||
+        /\bwas.*coupon.*used\b/i.test(lowerMessage)) {
+      return 'VERIFY_COUPON_USAGE';
+    }
+    
+    // FR08: Search by Customer Data
+    if (/@/.test(message) || /\+?\d{10,}/.test(message) ||
+        /\bfind.*order.*for\b/i.test(lowerMessage) ||
+        /\blast.*order.*for\b/i.test(lowerMessage)) {
+      return 'SEARCH_BY_CUSTOMER';
+    }
+    
+    // Greeting patterns
+    if (/^(hi|hello|hey|good morning|good evening|greetings)\b/i.test(lowerMessage)) {
+      return 'GREETING';
+    }
+    
+     if (/\b(today.*special|special.*today|show.*special|today'?s?\s+special)\b/i.test(lowerMessage) ||
+        lowerMessage === "today's specials" ||
+        lowerMessage === 'todays specials') {
+      return 'RECOMMEND';
+    }
+    // Payment/Checkout patterns
+    if (/\b(checkout|pay|payment|proceed.*pay|place.*order|complete.*order)\b/i.test(lowerMessage)) {
+      return 'CHECKOUT';
+    }
+    
+    // Payment success
+    if (/\b(payment.*completed|payment.*successful|payment.*success|order.*placed)\b/i.test(lowerMessage)) {
+      return 'PAYMENT_SUCCESS';
+    }
+    
+    // Cart patterns
+    if (/\b(add.*to.*cart|put.*in.*cart)\b/i.test(lowerMessage)) {
       return 'ADD_TO_CART';
     }
     
-    // View cart patterns (VERY SPECIFIC)
-    if (/^(show\s+my\s+cart|view\s+cart|see\s+cart|cart|my\s+cart)$/i.test(lowerMessage)) {
+    if (/^(show.*cart|view.*cart|see.*cart|my.*cart|cart)$/i.test(lowerMessage)) {
       return 'VIEW_CART';
     }
     
-    // Explicit search patterns (VERY SPECIFIC)
-    if (/^(search\s+for|find\s+me|do\s+you\s+have|show\s+me\s+menu|view\s+menu|menu)/.test(lowerMessage)) {
-      return 'SEARCH';
+    if (/\bremove.*from.*cart\b/i.test(lowerMessage)) {
+      return 'REMOVE_FROM_CART';
     }
     
-    // Explicit recommendation requests (VERY SPECIFIC)
-    if (/^(recommend|what\s+do\s+you\s+recommend|suggest\s+something|what.*popular|what.*good)/.test(lowerMessage)) {
+    if (/^(clear.*cart|empty.*cart|remove.*all)$/i.test(lowerMessage)) {
+      return 'CLEAR_CART';
+    }
+    
+    if (/\b(increase|decrease).*quantity\b/i.test(lowerMessage)) {
+      return 'UPDATE_CART_QUANTITY';
+    }
+    
+    // Menu and recommendations
+    if (/\b(menu|special|recommend|suggest|popular)\b/i.test(lowerMessage)) {
       return 'RECOMMEND';
     }
     
-    // Preference learning patterns
-    if (/\b(love|like|hate|prefer|favorite|favourite|don't like|dislike)\b/.test(lowerMessage)) {
+    // Search patterns
+    if (/^(search|find|show|get|view|see)\b/i.test(lowerMessage) ||
+        /\b(chicken|rice|biryani|curry|soup|food|dish)\b/i.test(lowerMessage)) {
+      return 'SEARCH';
+    }
+    
+    // Preference learning
+    if (/\b(love|like|hate|prefer|favorite|favourite|dislike)\b/i.test(lowerMessage)) {
       return 'LEARN_PREFERENCE';
-    }
-
-    // Add this pattern with your other cart patterns
-if (/^(clear\s+cart|empty\s+cart|remove\s+all|clear\s+my\s+cart)$/i.test(lowerMessage)) {
-  return 'CLEAR_CART';
-}
-
-    
-    // CONVERSATIONAL QUERIES - Let these go to AI
-    // Hunger expressions
-    if (/\b(hungry|starving|famished|want.*eat|need.*food|craving)\b/.test(lowerMessage)) {
-      return 'UNKNOWN';
-    }
-    
-    // Question words that indicate conversation
-    if (/^(what|how|why|when|where|which|can\s+you|could\s+you|would\s+you|tell\s+me|explain)/.test(lowerMessage)) {
-      return 'UNKNOWN';
-    }
-    
-    // In intentService.js, add this to your intent patterns:
-    if (lowerMessage.includes('reorder') && /\b\d{3,}\b/.test(message)) {
-      return 'REORDER';
-    }
-    
-    // Natural conversation starters
-    if (/\b(help|assist|advice|suggestion|opinion|think|feel|good\s+for|best\s+for)\b/.test(lowerMessage)) {
-      return 'UNKNOWN';
     }
     
     // Default to UNKNOWN for conversational AI
@@ -150,20 +123,33 @@ function extractEntities(message) {
     foods: [],
     quantities: [],
     preferences: [],
-    orderId: null
+    orderId: null,
+    email: null,
+    phone: null
   };
   
   const lowerMessage = message.toLowerCase();
   
   // Extract order ID
-  const orderIdRegex = /\b(\d{3,})\b/;
-  const orderIdMatch = message.match(orderIdRegex);
+  const orderIdMatch = message.match(/\b(\d{4,})\b/);
   if (orderIdMatch) {
     entities.orderId = orderIdMatch[1];
   }
   
+  // Extract email
+  const emailMatch = message.match(/\b[\w.-]+@[\w.-]+\.\w+\b/);
+  if (emailMatch) {
+    entities.email = emailMatch[0];
+  }
+  
+  // Extract phone
+  const phoneMatch = message.match(/\+?\d{10,}/);
+  if (phoneMatch) {
+    entities.phone = phoneMatch[0];
+  }
+  
   // Common food items
-  const foods = ['biryani', 'curry', 'naan', 'samosa', 'rice', 'chicken', 'lamb', 'vegetable'];
+  const foods = ['biryani', 'curry', 'naan', 'samosa', 'rice', 'chicken', 'lamb', 'vegetable', 'soup', 'fried'];
   foods.forEach(food => {
     if (lowerMessage.includes(food)) {
       entities.foods.push(food);
@@ -171,10 +157,9 @@ function extractEntities(message) {
   });
   
   // Quantity extraction
-  const quantityRegex = /(\d+)\s*(piece|pieces|pc|pcs|item|items)?/gi;
-  const quantityMatches = message.match(quantityRegex);
-  if (quantityMatches) {
-    entities.quantities = quantityMatches;
+  const quantityMatch = message.match(/(\d+)\s*(piece|pieces|pc|pcs|item|items|x)?/gi);
+  if (quantityMatch) {
+    entities.quantities = quantityMatch;
   }
   
   // Preference words
@@ -189,7 +174,7 @@ function extractEntities(message) {
 }
 
 if (DEBUG) {
-  console.log('[Intent] Service loaded with cart controls, coupon recognition, and AI-friendly classification');
+  console.log('[Intent] Service loaded with ALL features enabled');
 }
 
 module.exports = {

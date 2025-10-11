@@ -1,133 +1,188 @@
-// controllers/agentController.js
-const chatService = require('../services/chatservice');        // session lookups
-const messageService = require('../services/messageService');  // message persistence
-const AgentService = require('../services/agentService');
-const agentService = new AgentService(); // Instantiate the class
-const { reindexAllProducts } = require('../services/vectorService'); // vectors admin
+// src/controllers/agentController.js
+const agentService = require('../services/agentService');
+const Cart = require('../../models/Cart');      // ✅ FIX: Add ../
+const CartItem = require('../../models/CartItem'); // ✅ FIX: Add ../
 
-function toStr(x) {
-  if (x == null) return '';
-  return typeof x === 'string' ? x : String(x);
-}
+function setupSocketHandlers(io) {
+  io.on('connection', (socket) => {
+    console.log('[Socket] New client connected:', socket.id);
 
-class AgentController {
-  /**
-   * POST /api/v1/chat/chat
-   * Body: { sessionId, customerId, text }
-   */
-  async chat(req, res, next) {
-    try {
-      const sessionId  = toStr(req.body?.sessionId).trim();
-      const customerId = toStr(req.body?.customerId).trim();
-      const text       = toStr(req.body?.text).trim();
+    // Handle chat messages
+    socket.on('chat-message', async (data) => {
+      try {
+        const { customerId, message } = data;
 
-      if (!sessionId || !customerId || !text) {
-        return res.status(400).json({
-          success: false,
-          error: 'sessionId, customerId, text are required'
+        console.log(`[Socket] Message from ${customerId}: ${message}`);
+
+        // Process message through agent
+        const response = await agentService.processMessage(customerId, message);
+
+        console.log('[Socket] Sending response:', {
+          intent: response.intent,
+          hasProducts: response.productList?.length > 0,
+          hasCart: !!response.cartData,
+          cartItemCount: response.cartData?.cartItems?.length
+        });
+
+        // Emit response to client
+        socket.emit('bot-message', {
+          text: response.aiText,
+          intent: response.intent,
+          products: response.productList || [],
+          cart: response.cartData || null,
+          addToCart: response.addToCart || null,
+          orderData: response.orderData || null,
+          payment: response.payment || null,
+          suggestions: response.meta?.suggestions || [],
+          timestamp: response.meta?.timestamp || new Date().toISOString()
+        });
+
+      } catch (error) {
+        console.error('[Socket] Error handling message:', error);
+        socket.emit('bot-message', {
+          text: "I'm having trouble processing your request. Please try again.",
+          intent: 'ERROR',
+          products: [],
+          cart: null,
+          suggestions: ['Try again', 'View Menu'],
+          timestamp: new Date().toISOString()
         });
       }
+    });
 
-      console.log(`[Controller] Processing chat request for customer: ${customerId}, session: ${sessionId}`);
-
-      // 2) Let the agent respond (intent routing + catalog + vectors + context)
-      const out = await agentService.respond({ sessionId, customerId, text });
-      
-      // ADD DEBUG LOG TO SEE WHAT AGENT SERVICE RETURNS
-      console.log('[Controller] Agent service result:', JSON.stringify(out, null, 2));
-
-      // Extract cartData and orderData first
-      const cartData = (() => {
-        if (out?.cartData && typeof out.cartData === 'object') {
-          return out.cartData;
-        }
-        return null;
-      })();
-
-      const orderData = (() => {
-        if (out?.orderData && typeof out.orderData === 'object') {
-          return out.orderData;
-        }
-        return null;
-      })();
-
-      // Extract aiText properly - don't override empty strings for interactive components
-      const aiText = (() => {
-        if (typeof out?.aiText === 'object' && out.aiText?.text) {
-          // If aiText is a cart object, extract the text field
-          return out.aiText.text;
-        }
-        // If aiText is defined (including empty string), use it as-is
-        if (out?.aiText !== undefined) {
-          return out.aiText;
-        }
-        // Only use fallback if no interactive data is present
-        if (!orderData && !cartData && !out?.payment) {
-          return "";
-        }
-        // Return empty string for interactive components
-        return "";
-      })();
-
-      // Extract other fields
-      const intent      = toStr(out?.intent) || 'GENERAL';
-      const productList = Array.isArray(out?.productList) ? out.productList : [];
-      const addToCart   = out?.addToCart && typeof out.addToCart === 'object' ? out.addToCart : null;
-      const payment     = out?.payment && typeof out.payment === 'object' ? out.payment : null;
-      const extraMeta   = out?.meta && typeof out.meta === 'object' ? out.meta : {};
-
-      // 3) Skip message persistence to avoid foreign key errors
-      console.log('[Controller] Message persistence disabled to avoid database errors');
-
-      const finalResponse = {
-        success: true,
-        data: {
-          userMessage: 'processed',
-          aiMessage: 'generated',
-          aiText,
-          intent,
-          productList,
-          addToCart,
-          cartData,
-          orderData, 
-          payment,
-          meta: extraMeta
-        }
-      };
-      
-      // ADD DEBUG LOG TO SEE FINAL RESPONSE
-      console.log('[Controller] Final response:', JSON.stringify(finalResponse, null, 2));
-
-      return res.status(200).json(finalResponse);
-    } catch (err) {
-      console.error('[Controller] Chat error:', err);
-      return res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-      });
+    // Handle cart quantity updates
+    // Update cart quantity updates
+socket.on('update-cart-quantity', async (data) => {
+  try {
+    console.log('[Socket] 📥 Received update-cart-quantity:', data);
+    
+    const { customerId, productId, action } = data;
+    
+    if (!customerId || !productId || !action) {
+      console.error('[Socket] Missing required fields:', { customerId, productId, action });
+      return;
     }
-  }
 
-  /**
-   * POST /api/v1/chat/reindex
-   * Rebuilds product embeddings (pgvector) from your products table.
-   */
-  async reindex(req, res, next) {
-    try {
-      const result = await reindexAllProducts(); // { ok, fail, total }
-      return res.status(200).json({
-        success: true,
-        data: result,
-        message: 'Embeddings rebuilt'
+    console.log('[Socket] Update cart quantity:', { customerId, productId, action });
+
+    // Get current cart
+    const cart = await Cart.findOne({ customer_id: customerId });
+    if (!cart) {
+      console.error('[Socket] Cart not found for customer:', customerId);
+      socket.emit('bot-message', {
+        text: 'Cart not found',
+        intent: 'ERROR',
+        cart: null,
+        suggestions: ['View Menu'],
+        timestamp: new Date().toISOString()
       });
-    } catch (err) {
-      console.error('[Controller] Reindex error:', err);
-      return res.status(500).json({
-        success: false,
-        error: 'Reindex failed'
-      });
+      return;
     }
+
+    console.log('[Socket] Found cart:', cart.id);
+
+    // Find and update cart item
+    const item = await CartItem.findOne({ cart_id: cart.id, productId });
+    
+    if (!item) {
+      console.error('[Socket] Cart item not found:', productId);
+      socket.emit('bot-message', {
+        text: 'Item not found in cart',
+        intent: 'ERROR',
+        cart: null,
+        suggestions: ['View cart'],
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+
+    console.log('[Socket] Found item:', { id: item.id, currentQuantity: item.quantity });
+    
+    if (action === 'increase') {
+      item.quantity += 1;
+    } else if (action === 'decrease') {
+      item.quantity = Math.max(1, item.quantity - 1);
+    }
+    item.updated_at = new Date();
+    await item.save();
+    
+    console.log('[Socket] ✅ Updated item quantity to:', item.quantity);
+
+    // Get updated cart and send response
+    const response = await agentService.processMessage(customerId, 'show my cart');
+    
+    console.log('[Socket] Sending updated cart...');
+    socket.emit('bot-message', {
+      text: '', // No text, just cart
+      intent: response.intent,
+      products: response.productList || [],
+      cart: response.cartData || null,
+      suggestions: response.meta?.suggestions || [],
+      timestamp: response.meta?.timestamp || new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('[Socket] ❌ Update quantity error:', error);
+    socket.emit('bot-message', {
+      text: 'Error updating cart',
+      intent: 'ERROR',
+      cart: null,
+      suggestions: ['Try again'],
+      timestamp: new Date().toISOString()
+    });
   }
+});
+
+// Update remove from cart
+socket.on('remove-from-cart', async (data) => {
+  try {
+    console.log('[Socket] 📥 Received remove-from-cart:', data);
+    
+    const { customerId, productId } = data;
+    
+    if (!customerId || !productId) {
+      console.error('[Socket] Missing required fields:', { customerId, productId });
+      return;
+    }
+
+    console.log('[Socket] Remove from cart:', { customerId, productId });
+
+    // Remove item
+    await agentService.removeItemFromCart(customerId, productId);
+    console.log('[Socket] ✅ Item removed');
+
+    // Get updated cart and send response
+    const response = await agentService.processMessage(customerId, 'show my cart');
+    
+    console.log('[Socket] Sending updated cart...');
+    socket.emit('bot-message', {
+      text: response.aiText || '',
+      intent: response.intent,
+      products: response.productList || [],
+      cart: response.cartData || null,
+      suggestions: response.meta?.suggestions || [],
+      timestamp: response.meta?.timestamp || new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('[Socket] ❌ Remove from cart error:', error);
+    socket.emit('bot-message', {
+      text: 'Error removing item',
+      intent: 'ERROR',
+      cart: null,
+      suggestions: ['Try again'],
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+    // Handle disconnect
+    socket.on('disconnect', () => {
+      console.log('[Socket] Client disconnected:', socket.id);
+    });
+  });
 }
 
-module.exports = new AgentController();
+module.exports = {
+  setupSocketHandlers
+};

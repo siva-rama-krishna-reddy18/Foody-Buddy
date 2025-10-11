@@ -2,16 +2,17 @@
 // Complete enhanced socket service with enhanced chatbot features
 
 const { Server } = require('socket.io');
-const { PrismaClient } = require('@prisma/client');
-const  AgentService  = require('./agentService');
+const agentService = require('./agentService'); // Import instance directly
+const ChatSession = require('../../models/ChatSession');
+const Message = require('../../models/Message');
+const { v4: uuidv4 } = require('uuid');
 
-const prisma = new PrismaClient();
 const DEBUG = process.env.DEBUG_ORCHESTRATOR === 'true';
 
 class SocketService {
   constructor() {
     this.io = null;
-    this.agentService = new AgentService();
+    this.agentService = agentService; // Use imported instance
     this.connectedUsers = new Map(); // Track connected users
     this.userSessions = new Map(); // Track user sessions
   }
@@ -96,7 +97,7 @@ class SocketService {
             });
           }
           
-          if (data.sender === 'customer') {
+          if (data.sender === 'customer' || data.sender === 'user') {
             await this.handleCustomerMessage(socket, data);
           }
         } catch (error) {
@@ -150,7 +151,7 @@ class SocketService {
   
   async handleCustomerMessage(socket, data) {
     const customerId = data.customerId || data.phoneNumber;
-    const content = data.content || data.message;
+    const content = data.content || data.message || data.text;
     const sessionId = data.sessionId || socket.id;
     
     if (!customerId || !content) {
@@ -166,11 +167,7 @@ class SocketService {
       socket.emit('ai_typing', { typing: true });
       
       // Process message through enhanced agent service
-      const response = await this.agentService.processMessage({
-        sessionId: sessionId,
-        customerId: customerId,
-        content: content
-      });
+      const response = await this.agentService.processMessage(customerId, content);
       
       // Stop typing indicator
       socket.emit('ai_typing', { typing: false });
@@ -179,11 +176,9 @@ class SocketService {
       await this.saveMessage(sessionId, customerId, response.aiText, 'ai', {
         intent: response.intent,
         productList: response.productList || [],
-        suggestions: response.suggestions || [],
-        cartItems: response.cartItems,
-        total: response.total,
-        orderDetails: response.orderDetails,
-        addedItem: response.addedItem
+        suggestions: response.meta?.suggestions || [],
+        cartData: response.cartData,
+        orderData: response.orderData
       });
       
       // Send enhanced response to client
@@ -195,35 +190,30 @@ class SocketService {
         metadata: {
           intent: response.intent,
           productList: response.productList || [],
-          suggestions: response.suggestions || [],
-          cartItems: response.cartItems,
-          total: response.total,
-          orderDetails: response.orderDetails,
-          addedItem: response.addedItem
+          suggestions: response.meta?.suggestions || [],
+          cartData: response.cartData,
+          orderData: response.orderData,
+          addToCart: response.addToCart
         }
       };
       
       socket.emit('message', responseMessage);
       
       // Send specific event types for enhanced UI handling
-      if (response.intent === 'VIEW_CART' && response.cartItems) {
-        socket.emit('cart_updated', {
-          items: response.cartItems,
-          total: response.total,
-          itemCount: response.cartItems.length
-        });
+      if (response.intent === 'VIEW_CART' && response.cartData) {
+        socket.emit('cart_updated', response.cartData);
       }
       
-      if (response.intent === 'ORDER_STATUS' && response.orderDetails) {
-        socket.emit('order_status', response.orderDetails);
+      if (response.intent === 'ORDER_STATUS' && response.orderData) {
+        socket.emit('order_status', response.orderData);
       }
       
-      if (response.intent === 'ADD_TO_CART' && response.addedItem) {
-        socket.emit('item_added_to_cart', response.addedItem);
+      if (response.intent === 'ADD_TO_CART' && response.addToCart) {
+        socket.emit('item_added_to_cart', response.addToCart);
       }
       
       if (DEBUG) {
-        console.log(`SocketService: Sent AI (${response.intent})`);
+        console.log(`SocketService: Sent AI response (${response.intent})`);
       }
       
     } catch (error) {
@@ -242,34 +232,33 @@ class SocketService {
       switch (action) {
         case 'add':
           if (!productId) throw new Error('Product ID required for add action');
-          result = await this.agentService.processMessage({
-            sessionId: cartSessionId,
-            customerId: customerId,
-            content: `add ${quantity || 1} of product ${productId} to cart`
-          });
+          result = await this.agentService.processMessage(
+            customerId,
+            `add ${quantity || 1} of product ${productId} to cart`
+          );
           break;
           
         case 'remove':
           if (!productId) throw new Error('Product ID required for remove action');
-          // Implement cart removal logic
-          result = { success: true, message: 'Item removed from cart' };
+          result = await this.agentService.processMessage(
+            customerId,
+            `remove product ${productId} from cart`
+          );
           break;
           
         case 'clear':
-          // Clear entire cart
-          await prisma.cartItem.deleteMany({
-            where: { sessionId: cartSessionId }
-          });
-          result = { success: true, message: 'Cart cleared' };
+          result = await this.agentService.processMessage(
+            customerId,
+            'clear my cart'
+          );
           break;
           
         case 'view':
         default:
-          result = await this.agentService.processMessage({
-            sessionId: cartSessionId,
-            customerId: customerId,
-            content: 'show my cart'
-          });
+          result = await this.agentService.processMessage(
+            customerId,
+            'show my cart'
+          );
           break;
       }
       
@@ -292,11 +281,10 @@ class SocketService {
     const { orderNumber, customerId } = data;
     
     try {
-      const response = await this.agentService.processMessage({
-        sessionId: socket.id,
-        customerId: customerId,
-        content: orderNumber ? `status of order ${orderNumber}` : 'my recent orders'
-      });
+      const response = await this.agentService.processMessage(
+        customerId,
+        orderNumber ? `status of order ${orderNumber}` : 'my recent orders'
+      );
       
       socket.emit('order_status_result', {
         success: true,
@@ -314,15 +302,12 @@ class SocketService {
   async loadChatHistory(socket, customerId, sessionId) {
     try {
       // Load recent messages for the session
-      const messages = await prisma.messages.findMany({
-        where: {
-          session_id: sessionId || socket.id
-        },
-        orderBy: {
-          created_at: 'asc'
-        },
-        take: 50 // Last 50 messages
-      });
+      const messages = await Message.find({
+        session_id: sessionId || socket.id
+      })
+      .sort({ created_at: 1 })
+      .limit(50)
+      .lean();
       
       if (messages.length > 0) {
         const formattedMessages = messages.map(msg => ({
@@ -350,35 +335,35 @@ class SocketService {
   async saveMessage(sessionId, customerId, content, sender, metadata = null) {
     try {
       // Ensure chat session exists
-      await prisma.chat_sessions.upsert({
-        where: { id: sessionId },
-        create: {
+      await ChatSession.findOneAndUpdate(
+        { id: sessionId },
+        {
           id: sessionId,
           customer_id: customerId,
           title: `Chat ${new Date().toLocaleDateString()}`,
-          created_at: new Date(),
           updated_at: new Date()
         },
-        update: {
-          updated_at: new Date()
+        {
+          upsert: true,
+          setDefaultsOnInsert: true
         }
-      });
+      );
       
       // Save message
-      await prisma.messages.create({
-        data: {
-          id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          session_id: sessionId,
-          content: content,
-          sender: sender,
-          message_type: 'text',
-          metadata: metadata,
-          created_at: new Date()
-        }
+      await Message.create({
+        id: uuidv4(),
+        session_id: sessionId,
+        content: content,
+        sender: sender,
+        message_type: 'text',
+        metadata: metadata,
+        created_at: new Date()
       });
       
     } catch (error) {
-      console.error('SocketService: Message saving error:', error);
+      if (DEBUG) {
+        console.error('SocketService: Message saving error:', error);
+      }
       // Don't throw error to avoid disrupting the flow
     }
   }

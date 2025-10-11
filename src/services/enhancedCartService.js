@@ -1,29 +1,42 @@
+// src/services/cartService.js
+const mongoose = require('mongoose');
+const { v4: uuidv4 } = require('uuid');
+const Cart = require('../../models/Cart');
+const CartItem = require('../../models/CartItem');
+const Product = require('../../models/Product');
+
 class CartService {
   
-  async getCart(sessionId) {
+  async getCart(customerId) {
     try {
-      const cart = await prisma.cart.findUnique({
-        where: { sessionId },
-        include: {
-          items: {
-            include: { product: true }
-          }
-        }
-      });
+      const cart = await Cart.findOne({ customer_id: customerId }).lean();
       
       if (!cart) {
         return { items: [], total: 0, itemCount: 0 };
       }
       
-      const total = cart.items.reduce((sum, item) => 
-        sum + (parseFloat(item.product.price) * item.quantity), 0
+      const cartItems = await CartItem.find({ cart_id: cart.id }).lean();
+      
+      // Get product details for each cart item
+      const itemsWithDetails = await Promise.all(
+        cartItems.map(async (item) => {
+          const product = await Product.findOne({ id: item.productId }).lean();
+          return {
+            ...item,
+            product: product
+          };
+        })
+      );
+      
+      const total = itemsWithDetails.reduce((sum, item) => 
+        sum + (parseFloat(item.product?.price || 0) * item.quantity), 0
       );
       
       return {
         id: cart.id,
-        items: cart.items,
+        items: itemsWithDetails,
         total: total,
-        itemCount: cart.items.reduce((sum, item) => sum + item.quantity, 0)
+        itemCount: itemsWithDetails.reduce((sum, item) => sum + item.quantity, 0)
       };
     } catch (error) {
       console.error('Error fetching cart:', error);
@@ -31,102 +44,103 @@ class CartService {
     }
   }
   
-  async addToCart(sessionId, productId, quantity = 1, customizations = {}) {
+  async addToCart(customerId, productId, quantity = 1, customizations = {}) {
     try {
       // Get or create cart
-      let cart = await prisma.cart.findUnique({
-        where: { sessionId }
-      });
+      let cart = await Cart.findOne({ customer_id: customerId });
       
       if (!cart) {
-        cart = await prisma.cart.create({
-          data: { sessionId }
+        cart = await Cart.create({
+          id: uuidv4(),
+          customer_id: customerId,
+          session_id: uuidv4(),
+          status: 'OPEN',
+          created_at: new Date(),
+          updated_at: new Date()
         });
       }
       
       // Check if item already exists in cart
-      const existingItem = await prisma.cartItem.findFirst({
-        where: {
-          cartId: cart.id,
-          productId: productId
-        }
+      const existingItem = await CartItem.findOne({
+        cart_id: cart.id,
+        productId: productId
       });
       
       if (existingItem) {
         // Update quantity
-        await prisma.cartItem.update({
-          where: { id: existingItem.id },
-          data: { 
+        await CartItem.findOneAndUpdate(
+          { id: existingItem.id },
+          { 
             quantity: existingItem.quantity + quantity,
-            customizations: customizations
+            customizations: customizations,
+            updated_at: new Date()
           }
-        });
+        );
       } else {
+        // Get product details
+        const product = await Product.findOne({ id: productId }).lean();
+        
         // Add new item
-        await prisma.cartItem.create({
-          data: {
-            cartId: cart.id,
-            productId: productId,
-            quantity: quantity,
-            customizations: customizations
-          }
+        await CartItem.create({
+          id: uuidv4(),
+          cart_id: cart.id,
+          productId: productId,
+          title: product?.name || 'Item',
+          unit_price: parseFloat(product?.price || 0),
+          quantity: quantity,
+          customizations: customizations,
+          created_at: new Date(),
+          updated_at: new Date()
         });
       }
       
-      return await this.getCart(sessionId);
+      return await this.getCart(customerId);
     } catch (error) {
       console.error('Error adding to cart:', error);
       throw error;
     }
   }
   
-  async removeFromCart(sessionId, productId, quantity = null) {
+  async removeFromCart(customerId, productId, quantity = null) {
     try {
-      const cart = await prisma.cart.findUnique({
-        where: { sessionId }
-      });
+      const cart = await Cart.findOne({ customer_id: customerId });
       
       if (!cart) return { items: [], total: 0, itemCount: 0 };
       
-      const cartItem = await prisma.cartItem.findFirst({
-        where: {
-          cartId: cart.id,
-          productId: productId
-        }
+      const cartItem = await CartItem.findOne({
+        cart_id: cart.id,
+        productId: productId
       });
       
-      if (!cartItem) return await this.getCart(sessionId);
+      if (!cartItem) return await this.getCart(customerId);
       
       if (quantity === null || cartItem.quantity <= quantity) {
         // Remove item completely
-        await prisma.cartItem.delete({
-          where: { id: cartItem.id }
-        });
+        await CartItem.deleteOne({ id: cartItem.id });
       } else {
         // Reduce quantity
-        await prisma.cartItem.update({
-          where: { id: cartItem.id },
-          data: { quantity: cartItem.quantity - quantity }
-        });
+        await CartItem.findOneAndUpdate(
+          { id: cartItem.id },
+          { 
+            quantity: cartItem.quantity - quantity,
+            updated_at: new Date()
+          }
+        );
       }
       
-      return await this.getCart(sessionId);
+      return await this.getCart(customerId);
     } catch (error) {
       console.error('Error removing from cart:', error);
       throw error;
     }
   }
   
-  async clearCart(sessionId) {
+  async clearCart(customerId) {
     try {
-      const cart = await prisma.cart.findUnique({
-        where: { sessionId }
-      });
+      const cart = await Cart.findOne({ customer_id: customerId });
       
       if (cart) {
-        await prisma.cartItem.deleteMany({
-          where: { cartId: cart.id }
-        });
+        await CartItem.deleteMany({ cart_id: cart.id });
       }
       
       return { items: [], total: 0, itemCount: 0 };
@@ -137,9 +151,4 @@ class CartService {
   }
 }
 
-module.exports = { 
-  enhancedClassify, 
-  PreferenceService, 
-  RecommendationService, 
-  CartService 
-};
+module.exports = new CartService();

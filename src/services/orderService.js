@@ -1,44 +1,35 @@
 // src/services/orderService.js
-// Complete enhanced order service that works with your existing database structure
-
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const mongoose = require('mongoose');
+const Order = require('../../models/Order');
+const Customer = require('../../models/Customer');
+const Product = require('../../models/Product');
 
 const DEBUG = process.env.DEBUG_ORCHESTRATOR === 'true';
 
 class OrderService {
   
   /**
-   * Get order status by order number and customer ID
+   * Get order status by order number and group_id (customer identifier)
    */
-  async getOrderStatus(orderNumber, customerId) {
+  async getOrderStatus(orderNumber, groupId) {
     try {
-      const order = await prisma.order.findFirst({
-        where: {
-          orderNumber: orderNumber,
-          customerId: customerId
-        },
-        include: {
-          orderLineItems: true,
-          statusHistory: {
-            orderBy: { timestamp: 'desc' }
-          }
-        }
-      });
+      const order = await Order.findOne({
+        order_number: orderNumber,
+        group_id: groupId
+      }).lean();
       
       if (!order) {
         return null;
       }
       
       return {
-        orderNumber: order.orderNumber,
+        orderNumber: order.order_number,
         status: order.status,
         amount: order.amount,
-        paymentMethod: order.paymentMethod,
+        paymentMethod: order.payment_method,
         paymentStatus: this.getPaymentStatus(order),
-        createdAt: order.createdAt,
-        items: order.orderLineItems,
-        statusHistory: order.statusHistory,
+        createdAt: order.created_at,
+        items: order.line_items || [],
         estimatedDelivery: this.calculateEstimatedDelivery(order)
       };
     } catch (error) {
@@ -50,32 +41,21 @@ class OrderService {
   /**
    * Get customer orders with pagination
    */
-  async getCustomerOrders(customerId, limit = 10, offset = 0) {
+  async getCustomerOrders(groupId, limit = 10, offset = 0) {
     try {
-      const orders = await prisma.order.findMany({
-        where: { customerId },
-        include: {
-          orderLineItems: {
-            take: 3 // Limit items per order for performance
-          },
-          statusHistory: {
-            orderBy: { timestamp: 'desc' },
-            take: 1 // Only latest status
-          }
-        },
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-        skip: offset
-      });
+      const orders = await Order.find({ group_id: groupId })
+        .sort({ created_at: -1 })
+        .limit(limit)
+        .skip(offset)
+        .lean();
       
       return orders.map(order => ({
-        orderNumber: order.orderNumber,
+        orderNumber: order.order_number,
         status: order.status,
         amount: order.amount,
-        createdAt: order.createdAt,
-        itemCount: order.orderLineItems.length,
-        items: order.orderLineItems,
-        latestStatusUpdate: order.statusHistory[0]
+        createdAt: order.created_at,
+        itemCount: order.line_items?.length || 0,
+        items: order.line_items || []
       }));
     } catch (error) {
       console.error('Error fetching customer orders:', error);
@@ -84,28 +64,18 @@ class OrderService {
   }
   
   /**
-   * Update order status and create history entry
+   * Update order status
    */
   async updateOrderStatus(orderNumber, newStatus, notes = '') {
     try {
-      // Update order status
-      const order = await prisma.order.update({
-        where: { orderNumber },
-        data: { 
+      const order = await Order.findOneAndUpdate(
+        { order_number: orderNumber },
+        { 
           status: newStatus,
-          updatedAt: new Date()
-        }
-      });
-      
-      // Create status history entry
-      await prisma.orderStatusHistory.create({
-        data: {
-          orderNumber,
-          status: newStatus,
-          notes,
-          timestamp: new Date()
-        }
-      });
+          updated_at: new Date().toISOString()
+        },
+        { new: true }
+      );
       
       if (DEBUG) {
         console.log(`[OrderService] Updated order ${orderNumber} to ${newStatus}`);
@@ -119,94 +89,49 @@ class OrderService {
   }
   
   /**
-   * Create order from shopping cart
+   * Create order from cart
    */
-  async createOrderFromCart(sessionId, customerId, orderDetails = {}) {
+  async createOrderFromCart(groupId, cartItems, orderDetails = {}) {
     try {
-      // Get cart items
-      const cartItems = await prisma.cartItem.findMany({
-        where: { sessionId }
-      });
-      
-      if (cartItems.length === 0) {
+      if (!cartItems || cartItems.length === 0) {
         throw new Error('Cart is empty');
       }
       
-      // Get product details for pricing
-      const productIds = cartItems.map(item => item.productId);
-      const products = await prisma.product.findMany({
-        where: { id: { in: productIds } }
-      });
-      
-      const productMap = products.reduce((map, product) => {
-        map[product.id] = product;
-        return map;
-      }, {});
-      
-      // Calculate totals
-      const subtotal = cartItems.reduce((sum, item) => {
-        const product = productMap[item.productId];
-        return sum + (parseFloat(product?.price || 0) * item.quantity);
+      // Calculate total
+      const total = cartItems.reduce((sum, item) => {
+        return sum + (parseFloat(item.price || 0) * (item.quantity || 1));
       }, 0);
       
-      const tax = subtotal * 0.08; // 8% tax
-      const total = subtotal + tax;
+      // Generate order number
+      const orderNumber = Math.floor(100000 + Math.random() * 900000);
       
-      // Create order using your existing structure
-      const order = await prisma.order.create({
-        data: {
-          customerId: customerId,
-          amount: total,
-          status: 'pending',
-          paymentMethod: orderDetails.paymentMethod || 'pending',
-          currency: 'USD',
-          createdAt: new Date(),
-          groupId: orderDetails.groupId,
-          orderLineItems: {
-            create: cartItems.map(item => {
-              const product = productMap[item.productId];
-              return {
-                productId: item.productId,
-                productName: product?.name || 'Unknown Product',
-                price: product?.price || 0,
-                quantity: item.quantity,
-                preference: JSON.stringify(item.customizations) || null
-              };
-            })
-          }
-        },
-        include: {
-          orderLineItems: true
-        }
-      });
-      
-      // Create initial status history
-      await prisma.orderStatusHistory.create({
-        data: {
-          orderNumber: order.orderNumber,
-          status: 'pending',
-          notes: 'Order created from cart',
-          timestamp: new Date()
-        }
-      });
-      
-      // Clear cart after successful order creation
-      await prisma.cartItem.deleteMany({
-        where: { sessionId }
-      });
-      
-      // Clear cart record
-      await prisma.shoppingCart.deleteMany({
-        where: { sessionId }
+      // Create order
+      const order = await Order.create({
+        _id: new mongoose.Types.ObjectId(),
+        order_number: orderNumber,
+        group_id: groupId,
+        amount: total.toString(),
+        status: 'pending',
+        payment_method: orderDetails.paymentMethod || '',
+        currency: orderDetails.currency || 'usd',
+        created_at: new Date().toISOString(),
+        date: new Date().toISOString().split('T')[0],
+        line_items: cartItems.map(item => ({
+          product: item.productId || item.product,
+          price: item.price?.toString() || '0',
+          quantity: item.quantity || 1,
+          specialInstructions: item.specialInstructions || ''
+        })),
+        stripe_payment_intent: orderDetails.stripePaymentIntent || ''
       });
       
       if (DEBUG) {
-        console.log(`[OrderService] Created order ${order.orderNumber} from cart`);
+        console.log(`[OrderService] Created order ${order.order_number}`);
       }
       
       return order;
     } catch (error) {
-      console.error('Error creating order from cart:', error);
+      console.error('Error creating order:', error);
       throw error;
     }
   }
@@ -214,34 +139,38 @@ class OrderService {
   /**
    * Get order statistics for customer
    */
-  async getCustomerOrderStats(customerId) {
+  async getCustomerOrderStats(groupId) {
     try {
-      const stats = await prisma.order.aggregate({
-        where: { customerId },
-        _count: { orderNumber: true },
-        _sum: { amount: true },
-        _avg: { amount: true }
-      });
+      const orders = await Order.find({ group_id: groupId }).lean();
+      
+      const totalOrders = orders.length;
+      const totalSpent = orders.reduce((sum, order) => {
+        return sum + parseFloat(order.amount || 0);
+      }, 0);
+      const averageOrderValue = totalOrders > 0 ? totalSpent / totalOrders : 0;
       
       // Get favorite items
-      const favoriteItems = await prisma.orderLineItem.groupBy({
-        by: ['productName'],
-        where: {
-          order: { customerId }
-        },
-        _sum: { quantity: true },
-        orderBy: { _sum: { quantity: 'desc' } },
-        take: 5
+      const productCounts = {};
+      orders.forEach(order => {
+        (order.line_items || []).forEach(item => {
+          const productId = item.product;
+          productCounts[productId] = (productCounts[productId] || 0) + (item.quantity || 1);
+        });
       });
       
+      const favoriteItems = Object.entries(productCounts)
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, 5)
+        .map(([productId, quantity]) => ({ 
+          productId, 
+          totalQuantity: quantity 
+        }));
+      
       return {
-        totalOrders: stats._count.orderNumber || 0,
-        totalSpent: parseFloat(stats._sum.amount) || 0,
-        averageOrderValue: parseFloat(stats._avg.amount) || 0,
-        favoriteItems: favoriteItems.map(item => ({
-          name: item.productName,
-          totalQuantity: item._sum.quantity
-        }))
+        totalOrders,
+        totalSpent: parseFloat(totalSpent.toFixed(2)),
+        averageOrderValue: parseFloat(averageOrderValue.toFixed(2)),
+        favoriteItems
       };
     } catch (error) {
       console.error('Error getting customer order stats:', error);
@@ -259,40 +188,38 @@ class OrderService {
    */
   async searchOrders(filters = {}) {
     try {
-      const whereClause = {};
+      const query = {};
       
-      if (filters.customerId) {
-        whereClause.customerId = filters.customerId;
+      if (filters.groupId) {
+        query.group_id = filters.groupId;
       }
       
       if (filters.status) {
-        whereClause.status = filters.status;
+        query.status = filters.status;
       }
       
       if (filters.dateFrom && filters.dateTo) {
-        whereClause.createdAt = {
-          gte: new Date(filters.dateFrom),
-          lte: new Date(filters.dateTo)
+        query.created_at = {
+          $gte: filters.dateFrom,
+          $lte: filters.dateTo
         };
       }
       
       if (filters.minAmount || filters.maxAmount) {
-        whereClause.amount = {};
-        if (filters.minAmount) whereClause.amount.gte = parseFloat(filters.minAmount);
-        if (filters.maxAmount) whereClause.amount.lte = parseFloat(filters.maxAmount);
+        // Need to handle string amounts
+        const orders = await Order.find(query).lean();
+        return orders.filter(order => {
+          const amount = parseFloat(order.amount || 0);
+          if (filters.minAmount && amount < parseFloat(filters.minAmount)) return false;
+          if (filters.maxAmount && amount > parseFloat(filters.maxAmount)) return false;
+          return true;
+        }).slice(0, filters.limit || 50);
       }
       
-      const orders = await prisma.order.findMany({
-        where: whereClause,
-        include: {
-          orderLineItems: true,
-          customer: {
-            select: { name: true, phone: true }
-          }
-        },
-        orderBy: { createdAt: 'desc' },
-        take: filters.limit || 50
-      });
+      const orders = await Order.find(query)
+        .sort({ created_at: -1 })
+        .limit(filters.limit || 50)
+        .lean();
       
       return orders;
     } catch (error) {
@@ -304,10 +231,11 @@ class OrderService {
   /**
    * Cancel order
    */
-  async cancelOrder(orderNumber, customerId, reason = '') {
+  async cancelOrder(orderNumber, groupId, reason = '') {
     try {
-      const order = await prisma.order.findFirst({
-        where: { orderNumber, customerId }
+      const order = await Order.findOne({ 
+        order_number: orderNumber, 
+        group_id: groupId 
       });
       
       if (!order) {
@@ -334,10 +262,10 @@ class OrderService {
   // Helper methods
   
   getPaymentStatus(order) {
-    if (order.stripePaymentIntent) {
+    if (order.stripe_payment_intent && order.stripe_payment_intent !== '') {
       return 'paid';
     }
-    if (order.paymentMethod && order.paymentMethod !== 'pending') {
+    if (order.payment_method && order.payment_method !== '') {
       return 'processing';
     }
     return 'pending';
@@ -349,12 +277,16 @@ class OrderService {
     }
     
     const now = new Date();
-    const orderTime = new Date(order.createdAt);
+    let orderTime;
     
-    // Simple estimation: 45 minutes from order time
+    try {
+      orderTime = new Date(order.created_at);
+    } catch (e) {
+      orderTime = now;
+    }
+    
     const estimatedDelivery = new Date(orderTime.getTime() + (45 * 60 * 1000));
     
-    // If estimated time has passed, add 30 minutes from now
     if (estimatedDelivery < now) {
       return new Date(now.getTime() + (30 * 60 * 1000));
     }
@@ -364,6 +296,7 @@ class OrderService {
   
   formatOrderForDisplay(order) {
     const statusMessages = {
+      'started': 'Order has been started',
       'pending': 'Order received and being processed',
       'confirmed': 'Order confirmed and being prepared',
       'preparing': 'Your order is being prepared',
@@ -374,44 +307,42 @@ class OrderService {
     };
     
     return {
-      orderNumber: order.orderNumber,
+      orderNumber: order.order_number,
       status: order.status,
       statusMessage: statusMessages[order.status] || order.status,
       amount: order.amount,
-      createdAt: order.createdAt,
+      createdAt: order.created_at,
       estimatedDelivery: this.calculateEstimatedDelivery(order),
-      items: order.orderLineItems || [],
-      itemCount: order.orderLineItems?.length || 0
+      items: order.line_items || [],
+      itemCount: order.line_items?.length || 0
     };
   }
 }
 
-// Export both class and individual functions for backward compatibility
 const orderService = new OrderService();
 
 module.exports = {
   OrderService,
   orderService,
   
-  // Individual functions for backward compatibility
-  getOrderStatus: (orderNumber, customerId) => 
-    orderService.getOrderStatus(orderNumber, customerId),
+  getOrderStatus: (orderNumber, groupId) => 
+    orderService.getOrderStatus(orderNumber, groupId),
     
-  getCustomerOrders: (customerId, limit, offset) => 
-    orderService.getCustomerOrders(customerId, limit, offset),
+  getCustomerOrders: (groupId, limit, offset) => 
+    orderService.getCustomerOrders(groupId, limit, offset),
     
   updateOrderStatus: (orderNumber, status, notes) => 
     orderService.updateOrderStatus(orderNumber, status, notes),
     
-  createOrderFromCart: (sessionId, customerId, orderDetails) => 
-    orderService.createOrderFromCart(sessionId, customerId, orderDetails),
+  createOrderFromCart: (groupId, cartItems, orderDetails) => 
+    orderService.createOrderFromCart(groupId, cartItems, orderDetails),
     
-  getCustomerOrderStats: (customerId) => 
-    orderService.getCustomerOrderStats(customerId),
+  getCustomerOrderStats: (groupId) => 
+    orderService.getCustomerOrderStats(groupId),
     
   searchOrders: (filters) => 
     orderService.searchOrders(filters),
     
-  cancelOrder: (orderNumber, customerId, reason) => 
-    orderService.cancelOrder(orderNumber, customerId, reason)
+  cancelOrder: (orderNumber, groupId, reason) => 
+    orderService.cancelOrder(orderNumber, groupId, reason)
 };
