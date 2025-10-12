@@ -9,46 +9,64 @@ function setupSocketHandlers(io) {
 
     // Handle chat messages
     socket.on('chat-message', async (data) => {
-      try {
-        const { customerId, message } = data;
-
-        console.log(`[Socket] Message from ${customerId}: ${message}`);
-
-        // Process message through agent
-        const response = await agentService.processMessage(customerId, message);
-
-        console.log('[Socket] Sending response:', {
-          intent: response.intent,
-          hasProducts: response.productList?.length > 0,
-          hasCart: !!response.cartData,
-          cartItemCount: response.cartData?.cartItems?.length
-        });
-
-        // Emit response to client
-        socket.emit('bot-message', {
-          text: response.aiText,
-          intent: response.intent,
-          products: response.productList || [],
-          cart: response.cartData || null,
-          addToCart: response.addToCart || null,
-          orderData: response.orderData || null,
-          payment: response.payment || null,
-          suggestions: response.meta?.suggestions || [],
-          timestamp: response.meta?.timestamp || new Date().toISOString()
-        });
-
-      } catch (error) {
-        console.error('[Socket] Error handling message:', error);
-        socket.emit('bot-message', {
-          text: "I'm having trouble processing your request. Please try again.",
-          intent: 'ERROR',
-          products: [],
-          cart: null,
-          suggestions: ['Try again', 'View Menu'],
-          timestamp: new Date().toISOString()
-        });
-      }
+  try {
+    const { customerId, message, sessionId } = data;
+    
+    console.log('[Socket] 📨 Chat message received:', {
+      customerId,
+      message: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
+      messageLength: message.length,
+      sessionId
     });
+
+    if (!customerId || !message) {
+      console.error('[Socket] Missing required fields:', { customerId: !!customerId, message: !!message });
+      socket.emit('error', { message: 'Missing required fields' });
+      return;
+    }
+
+    // ✅ Log if it's a JSON message
+    if (message.trim().startsWith('{')) {
+      console.log('[Socket] 🔍 Detected JSON message, first 200 chars:', message.substring(0, 200));
+    }
+
+    // Process message through agent
+    const response = await agentService.processMessage(customerId, message, sessionId);
+    
+    console.log('[Socket] ✅ Sending response with intent:', response.intent);
+    console.log('[Socket] 📤 Has products:', response.hasProducts);
+    console.log('[Socket] 📤 Has cart:', response.hasCart);
+    console.log('[Socket] 📤 Has payment:', !!response.payment);
+    
+    // ✅ Emit as 'bot-message' to match frontend listener
+    socket.emit('bot-message', {
+      text: response.aiText || '',
+      intent: response.intent,
+      products: response.productList || [],
+      cart: response.cartData || null,
+      payment: response.payment || null,
+      orderData: response.orderData || null,
+      addToCart: response.addToCart || null,
+      suggestions: response.meta?.suggestions || [],
+      timestamp: response.meta?.timestamp || new Date().toISOString()
+    });
+    
+    console.log('[Socket] ✅ bot-message emitted successfully');
+
+  } catch (error) {
+    console.error('[Socket] Error processing message:', error);
+    socket.emit('bot-message', {
+      text: "I'm having trouble processing that. Please try again.",
+      intent: 'ERROR',
+      products: [],
+      cart: null,
+      payment: null,
+      orderData: null,
+      suggestions: ['Try again'],
+      timestamp: new Date().toISOString()
+    });
+  }
+});
 
     // Handle cart quantity updates
     // Update cart quantity updates

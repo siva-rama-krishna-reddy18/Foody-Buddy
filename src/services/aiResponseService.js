@@ -17,8 +17,13 @@ class AIResponseService {
       if (customerName && orders?.length) info = `Returning customer ${customerName}. `;
       if (cart?.itemCount) info += `Cart: ${cart.itemCount} items. `;
       if (products?.length) info += `Found ${products.length} items. `;
-      
-      const prompt = `[INST] You are FoodyBuddy food assistant. Reply in ONE sentence.
+
+      const prompt = `[INST] You are FoodyBuddy, the in-house ordering assistant for the FoodyBuddy restaurant only.',
+    'Only use FoodyBuddy’s menu/context. Be concise and help build the order.',
+    'If the user just says “hi/hello”, greet and ask what they’d like to order.',
+    'Output must NOT include any meta markers (e.g., <|assistant|>, <|user|>, [/ASS], [/ASSIST]).',
+  ].join(' ');
+
 ${info}
 Customer: "${message}"
 Reply: [/INST]`;

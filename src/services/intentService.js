@@ -5,111 +5,144 @@ async function classifyIntent(message) {
   try {
     const lowerMessage = message.toLowerCase().trim();
     
-    // FR01: Order Search by Number - HIGHEST PRIORITY
-    if (/\b(order|#)\s*\d{4,}\b/i.test(message) || /\blook.*up.*order\b/i.test(lowerMessage)) {
+    console.log(`[Intent] Classifying: "${message}"`);
+    
+    // ✅ SILENT CART REQUEST
+    if (message === 'get_cart_silent') {
+      console.log('[Intent] ✅ SILENT CART REQUEST');
+      return 'VIEW_CART';
+    }
+    
+    // ✅ PAYMENT SUCCESS
+    if (message === 'PAYMENT_COMPLETE_CREATE_ORDER') {
+      console.log('[Intent] ✅ EXACT MATCH: PAYMENT_COMPLETE_CREATE_ORDER');
+      return 'PAYMENT_SUCCESS';
+    }
+    
+    // ✅ REORDER
+    if (/\breorder\s+\d{4,}\b/i.test(message) || 
+        /\breorder\s+#?\d{4,}\b/i.test(message) ||
+        lowerMessage.startsWith('reorder ')) {
+      console.log('[Intent] ✅ Matched REORDER');
+      return 'REORDER';
+    }
+    
+    // ✅ VIEW ORDER DETAILS
+    if (/\b(show|view|see)\s+(details|info).*order\s+\d{4,}\b/i.test(message) ||
+        /\border\s+\d{4,}\s+(details|info)\b/i.test(message)) {
+      console.log('[Intent] ✅ Matched TRACK_ORDER (view details)');
       return 'TRACK_ORDER';
     }
     
-    // FR02: Get Order Status
-    if (/\b(status|track).*\border\b/i.test(lowerMessage) || 
-        /\border.*\b(status|tracking)\b/i.test(lowerMessage)) {
-      return 'ORDER_STATUS';
-    }
-    
-    // FR03: Query Order Items
-    if (/\b(what.*in|items.*in|products.*in|contents.*of).*\border\b/i.test(lowerMessage)) {
-      return 'TRACK_ORDER';
-    }
-    
-    // FR04: Verify Amount and Payment
-    if (/\b(amount|paid|payment|cost|price|total).*\border\b/i.test(lowerMessage) ||
-        /\border.*\b(amount|paid|payment|cost)\b/i.test(lowerMessage)) {
-      return 'TRACK_ORDER';
-    }
-    
-    // FR05: Get Special Instructions
-    if (/\b(special.*instruction|instruction|note|request).*\border\b/i.test(lowerMessage) ||
-        /\border.*\b(instruction|note|special)\b/i.test(lowerMessage)) {
-      return 'GET_SPECIAL_INSTRUCTIONS';
-    }
-    
-    // FR06: Query Customer Information
-    if (/\b(customer.*info|email|phone|address).*\border\b/i.test(lowerMessage) ||
-        /\bget.*\b(email|phone|contact|address)\b/i.test(lowerMessage)) {
-      return 'GET_CUSTOMER_INFO';
-    }
-    
-    // FR07: Verify Coupon Usage
-    if (/\b(coupon|discount|promo).*\b(used|applied)\b/i.test(lowerMessage) ||
-        /\bwas.*coupon.*used\b/i.test(lowerMessage)) {
-      return 'VERIFY_COUPON_USAGE';
-    }
-    
-    // FR08: Search by Customer Data
-    if (/@/.test(message) || /\+?\d{10,}/.test(message) ||
-        /\bfind.*order.*for\b/i.test(lowerMessage) ||
-        /\blast.*order.*for\b/i.test(lowerMessage)) {
-      return 'SEARCH_BY_CUSTOMER';
-    }
-    
+    // Add near the Menu section
+if (/\b(menu|view.*menu|show.*menu|browse.*menu)\b/i.test(lowerMessage) ||
+    lowerMessage === 'add more items' ||           // ✅ ADD THIS
+    lowerMessage === 'browse items' ||             // ✅ ADD THIS
+    lowerMessage === 'shop more' ||                // ✅ ADD THIS
+    lowerMessage === 'continue shopping') {        // ✅ ADD THIS
+  console.log('[Intent] ✅ Matched RECOMMEND (menu)');
+  return 'RECOMMEND';
+}
     // Greeting patterns
     if (/^(hi|hello|hey|good morning|good evening|greetings)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched GREETING');
       return 'GREETING';
     }
     
-     if (/\b(today.*special|special.*today|show.*special|today'?s?\s+special)\b/i.test(lowerMessage) ||
-        lowerMessage === "today's specials" ||
-        lowerMessage === 'todays specials') {
-      return 'RECOMMEND';
-    }
-    // Payment/Checkout patterns
-    if (/\b(checkout|pay|payment|proceed.*pay|place.*order|complete.*order)\b/i.test(lowerMessage)) {
-      return 'CHECKOUT';
+    // ✅ Track Orders - EXACT MATCHES FIRST (including "view all orders")
+    if (lowerMessage === 'track orders' || 
+        lowerMessage === 'my orders' ||
+        lowerMessage === 'order history' ||
+        lowerMessage === 'view order history' ||
+        lowerMessage === 'show my orders' ||
+        lowerMessage === 'view my orders' ||
+        lowerMessage === 'track this order' ||
+        lowerMessage === 'view all orders' ||  // ✅ ADD THIS
+        lowerMessage === 'show all orders' ||  // ✅ ADD THIS
+        lowerMessage === 'all orders') {        // ✅ ADD THIS
+      console.log('[Intent] ✅ Matched ORDER_STATUS (exact)');
+      return 'ORDER_STATUS';
     }
     
-    // Payment success
-    if (/\b(payment.*completed|payment.*successful|payment.*success|order.*placed)\b/i.test(lowerMessage)) {
-      return 'PAYMENT_SUCCESS';
+    // Track Orders - PATTERN MATCHES
+    if (/\btrack.*orders?\b/i.test(lowerMessage) ||
+        /\bmy.*orders?\b/i.test(lowerMessage) ||
+        /\border.*history\b/i.test(lowerMessage) ||
+        /\ball.*orders?\b/i.test(lowerMessage) ||  // ✅ ADD THIS
+        /\bview.*all.*orders?\b/i.test(lowerMessage)) {  // ✅ ADD THIS
+      console.log('[Intent] ✅ Matched ORDER_STATUS (pattern)');
+      return 'ORDER_STATUS';
+    }
+    
+    // Track specific order by number
+    if (/\b(track|check|status).*order.*\d{4,}\b/i.test(message) || 
+        /\border.*\d{4,}.*\b(track|status)\b/i.test(message)) {
+      console.log('[Intent] ✅ Matched TRACK_ORDER');
+      return 'TRACK_ORDER';
+    }
+    
+    // Menu and Today's Specials
+    if (/\b(today.*special|special.*today|show.*special|today'?s?\s+special)\b/i.test(lowerMessage) ||
+        lowerMessage === "today's specials" ||
+        lowerMessage === 'todays specials') {
+      console.log('[Intent] ✅ Matched RECOMMEND (specials)');
+      return 'RECOMMEND';
+    }
+    
+    if (/\b(menu|view.*menu|show.*menu|browse.*menu)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched RECOMMEND (menu)');
+      return 'RECOMMEND';
+    }
+    
+    // ✅ PLACE NEW ORDER - Should go to menu, not checkout
+    if (lowerMessage === 'place new order' || 
+        lowerMessage === 'place another order' ||
+        lowerMessage === 'order again') {
+      console.log('[Intent] ✅ Matched RECOMMEND (new order)');
+      return 'RECOMMEND';
+    }
+    
+    // Checkout
+    if (/\b(checkout|pay|payment|proceed.*pay|complete.*order)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched CHECKOUT');
+      return 'CHECKOUT';
     }
     
     // Cart patterns
     if (/\b(add.*to.*cart|put.*in.*cart)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched ADD_TO_CART');
       return 'ADD_TO_CART';
     }
     
     if (/^(show.*cart|view.*cart|see.*cart|my.*cart|cart)$/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched VIEW_CART');
       return 'VIEW_CART';
     }
     
     if (/\bremove.*from.*cart\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched REMOVE_FROM_CART');
       return 'REMOVE_FROM_CART';
     }
     
     if (/^(clear.*cart|empty.*cart|remove.*all)$/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched CLEAR_CART');
       return 'CLEAR_CART';
     }
     
-    if (/\b(increase|decrease).*quantity\b/i.test(lowerMessage)) {
-      return 'UPDATE_CART_QUANTITY';
-    }
-    
-    // Menu and recommendations
-    if (/\b(menu|special|recommend|suggest|popular)\b/i.test(lowerMessage)) {
-      return 'RECOMMEND';
-    }
-    
-    // Search patterns
-    if (/^(search|find|show|get|view|see)\b/i.test(lowerMessage) ||
+    // Search - LAST
+    if (/^(search|find)\b/i.test(lowerMessage) ||
         /\b(chicken|rice|biryani|curry|soup|food|dish)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched SEARCH');
       return 'SEARCH';
     }
     
     // Preference learning
     if (/\b(love|like|hate|prefer|favorite|favourite|dislike)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched LEARN_PREFERENCE');
       return 'LEARN_PREFERENCE';
     }
     
-    // Default to UNKNOWN for conversational AI
+    console.log('[Intent] ⚠️ No match, returning UNKNOWN');
     return 'UNKNOWN';
     
   } catch (error) {
@@ -119,16 +152,7 @@ async function classifyIntent(message) {
 }
 
 function extractEntities(message) {
-  const entities = {
-    foods: [],
-    quantities: [],
-    preferences: [],
-    orderId: null,
-    email: null,
-    phone: null
-  };
-  
-  const lowerMessage = message.toLowerCase();
+  const entities = {};
   
   // Extract order ID
   const orderIdMatch = message.match(/\b(\d{4,})\b/);
@@ -136,45 +160,7 @@ function extractEntities(message) {
     entities.orderId = orderIdMatch[1];
   }
   
-  // Extract email
-  const emailMatch = message.match(/\b[\w.-]+@[\w.-]+\.\w+\b/);
-  if (emailMatch) {
-    entities.email = emailMatch[0];
-  }
-  
-  // Extract phone
-  const phoneMatch = message.match(/\+?\d{10,}/);
-  if (phoneMatch) {
-    entities.phone = phoneMatch[0];
-  }
-  
-  // Common food items
-  const foods = ['biryani', 'curry', 'naan', 'samosa', 'rice', 'chicken', 'lamb', 'vegetable', 'soup', 'fried'];
-  foods.forEach(food => {
-    if (lowerMessage.includes(food)) {
-      entities.foods.push(food);
-    }
-  });
-  
-  // Quantity extraction
-  const quantityMatch = message.match(/(\d+)\s*(piece|pieces|pc|pcs|item|items|x)?/gi);
-  if (quantityMatch) {
-    entities.quantities = quantityMatch;
-  }
-  
-  // Preference words
-  const preferences = ['spicy', 'mild', 'sweet', 'sour', 'vegetarian', 'vegan', 'halal'];
-  preferences.forEach(pref => {
-    if (lowerMessage.includes(pref)) {
-      entities.preferences.push(pref);
-    }
-  });
-  
   return entities;
-}
-
-if (DEBUG) {
-  console.log('[Intent] Service loaded with ALL features enabled');
 }
 
 module.exports = {
