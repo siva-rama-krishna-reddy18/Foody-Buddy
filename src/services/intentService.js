@@ -28,11 +28,14 @@ async function classifyIntent(message) {
     }
     
     // ✅ VIEW ORDER DETAILS
-    if (/\b(show|view|see)\s+(details|info).*order\s+\d{4,}\b/i.test(message) ||
-        /\border\s+\d{4,}\s+(details|info)\b/i.test(message)) {
-      console.log('[Intent] ✅ Matched TRACK_ORDER (view details)');
-      return 'TRACK_ORDER';
-    }
+    // In the TRACK_ORDER section, add more patterns
+if (/\b(show|view|see|details|status|check|track).*order.*\d{4,}\b/i.test(message) ||
+    /\border.*\d{4,}.*(show|view|see|details|status|check|track)\b/i.test(message) ||
+    /\bdetails.*of.*order.*\d{4,}\b/i.test(message) ||      // ✅ ADD THIS
+    /\bstatus.*of.*order.*\d{4,}\b/i.test(message)) {       // ✅ ADD THIS
+  console.log('[Intent] ✅ Matched TRACK_ORDER (view details)');
+  return 'TRACK_ORDER';
+}
     
     // Add near the Menu section
 if (/\b(menu|view.*menu|show.*menu|browse.*menu)\b/i.test(lowerMessage) ||

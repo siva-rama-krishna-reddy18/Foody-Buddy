@@ -1,4 +1,5 @@
 // src/services/agentService.js
+const { generateAIResponse, testOllamaConnection } = require('./aiResponseService');
 const { classifyIntent, extractEntities } = require('./intentService');
 const { searchSimilar } = require('./vectorService');
 const Cart = require('../../models/Cart');
@@ -16,6 +17,10 @@ const DEBUG = process.env.DEBUG_ORCHESTRATOR === 'true';
 const USE_AI = process.env.USE_AI_RESPONSES !== 'false';
 
 class AgentService {
+  constructor() {
+    // Test Ollama on startup
+    testOllamaConnection();
+  }
   async processMessage(customerId, message, sessionId = null) {
   try {
     console.log('[Agent] Processing:', `"${message}"`, 'for customer:', customerId);
@@ -29,7 +34,7 @@ class AgentService {
     // Route to appropriate handler
     switch (intent) {
       case 'GREETING':
-        response = this.handleGreeting(customerId);
+        response = await this.handleGreeting(customerId, message);
         break;
 
       case 'RECOMMEND':
@@ -86,8 +91,9 @@ class AgentService {
 
       case 'UNKNOWN':
       default:
+        const aiText = await generateAIResponse('UNKNOWN', {}, message);
         response = {
-          aiText: "I didn't quite understand that. Could you rephrase? 🤔\n\nTry: 'Show menu', 'Add pizza to cart', 'View my cart', or 'Track orders'",
+          aiText,
           intent: 'UNKNOWN',
           productList: [],
           addToCart: null,
@@ -136,9 +142,12 @@ class AgentService {
     };
   }
   }
-  handleGreeting(customerId) {
+   async handleGreeting(customerId, message = '') {
+    console.log('[Agent] Handling greeting, generating AI response...');
+  const aiText = await generateAIResponse('GREETING', {}, message);
+  console.log('[Agent] ✅ AI greeting generated:', aiText);
     return {
-      aiText: "Hello! 👋 Welcome to FoodyBuddy. I'm here to help you order delicious food. What would you like today?",
+      aiText,
       intent: 'GREETING',
       productList: [],
       addToCart: null,
@@ -446,32 +455,34 @@ class AgentService {
       console.log('[Agent] Order items:', orderItems.length);
 
       // Create order in database
-      const order = await Order.create({
-        order_number: orderNumber,
-        amount: finalAmount.toFixed(2), // ✅ Use discounted amount
-        amount_paid: finalAmount.toFixed(2),
-        original_amount: cart.total.toString(), // ✅ Save original amount
-        discount_amount: discount.toFixed(2), // ✅ Save discount
-        coupon_code: appliedCoupon?.code || null, // ✅ Save coupon
-        created_at: orderDate.toISOString(),
-        date: orderDate.toISOString(),
-        currency: 'USD',
-        group_id: customerId,
-        customer_id: customerId,
-        line_items: orderItems,
-        payment_method: 'CARD',
-        status: 'CONFIRMED',
-        orderNumberProvisional: orderNumber
-      });
+      // Create order in database
+const order = await Order.create({
+  order_number: orderNumber,
+  amount: finalAmount.toFixed(2),
+  amount_paid: finalAmount.toFixed(2),
+  original_amount: cart.total.toFixed(2),     // ✅ Correct field name
+  discount_amount: discount.toFixed(2),       // ✅ Correct field name (not 'discount')
+  coupon_code: appliedCoupon?.code || null,   // ✅ Correct field name (not 'coupon')
+  created_at: orderDate.toISOString(),
+  date: orderDate.toISOString(),
+  currency: 'USD',
+  group_id: customerId,
+  customer_id: customerId,
+  line_items: orderItems,
+  payment_method: 'CARD',
+  status: 'CONFIRMED',
+  orderNumberProvisional: orderNumber
+});
 
-      console.log('[Agent] ✅ Order created in database:', {
-        _id: order._id,
-        orderNumber: order.order_number,
-        amount: order.amount,
-        discount: discount > 0 ? `$${discount.toFixed(2)}` : 'None',
-        coupon: appliedCoupon?.code || 'None',
-        items: order.line_items.length
-      });
+console.log('[Agent] ✅ Order created in database:', {
+  _id: order._id,
+  orderNumber: order.order_number,
+  amount: order.amount,
+  original_amount: order.original_amount,         // ✅ Log correct field
+  discount_amount: order.discount_amount,         // ✅ Log correct field
+  coupon_code: order.coupon_code,                 // ✅ Log correct field
+  items: order.line_items.length
+});
 
       // Clear cart and stored payment data
       await this.clearCartItems(customerId);
@@ -520,7 +531,7 @@ class AgentService {
           }]
         },
         meta: {
-          suggestions: ['View all orders', 'Place another order', 'View Menu'],
+         // suggestions: ['View all orders', 'Place another order', 'View Menu'],
           timestamp: new Date().toISOString()
         }
       };
@@ -549,60 +560,265 @@ class AgentService {
   }
   
   async handleOrderStatus(customerId) {
-    try {
-      const orders = await Order.find({ $or: [{ group_id: customerId }, { customer_id: customerId }] }).sort({ created_at: -1 }).limit(10).lean();
-      console.log(`[Agent] Found ${orders.length} orders for customer: ${customerId}`);
-      if (orders.length === 0) {
-        return { aiText: "You don't have any orders yet. Ready to place your first order? 🎯", intent: 'ORDER_STATUS', productList: [], addToCart: null, cartData: null, orderData: null, meta: { suggestions: ['View Menu', 'Browse Specials'], timestamp: new Date().toISOString() } };
-      }
-      const orderList = orders.map(o => ({ id: o._id.toString(), orderNumber: o.order_number?.toString() || o._id.toString(), status: this.mapOrderStatus(o.status), date: new Date(o.created_at || o.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }), total: parseFloat(o.amount || 0), estimatedDelivery: this.getEstimatedDelivery(o), items: (o.line_items || []).map(item => ({ name: item.product || item.title || 'Unknown Item', quantity: item.quantity || 1, price: parseFloat(item.price || 0) })) }));
-      return { aiText: '', intent: 'ORDER_STATUS', productList: [], addToCart: null, cartData: null, orderData: { type: 'order_tracking', orders: orderList }, meta: { suggestions: ['Place new order', 'View Menu'], timestamp: new Date().toISOString() } };
-    } catch (error) {
-      console.error('[Agent] Order status error:', error);
-      return { aiText: "I couldn't load your orders. Please try again.", intent: 'ORDER_STATUS', productList: [], addToCart: null, cartData: null, orderData: null, meta: { suggestions: ['Try again', 'View Menu'], timestamp: new Date().toISOString() } };
+  try {
+    const orders = await Order.find({ 
+      $or: [{ group_id: customerId }, { customer_id: customerId }] 
+    })
+    .sort({ created_at: -1 })
+    .limit(10)
+    .lean();
+    
+    console.log(`[Agent] Found ${orders.length} orders for customer: ${customerId}`);
+    
+    if (orders.length === 0) {
+      return { 
+        aiText: "You don't have any orders yet. Ready to place your first order? 🎯", 
+        intent: 'ORDER_STATUS', 
+        productList: [], 
+        addToCart: null, 
+        cartData: null, 
+        orderData: null, 
+        meta: { 
+          suggestions: ['View Menu', 'Browse Specials'], 
+          timestamp: new Date().toISOString() 
+        } 
+      };
     }
+    
+    // ✅ Map orders with proper context
+    const orderList = orders.map(o => {
+      // ✅ Extract discount info
+      const hasDiscount = o.discount_amount && parseFloat(o.discount_amount) > 0;
+      const finalAmount = parseFloat(o.amount || 0);
+      const originalAmount = o.original_amount ? parseFloat(o.original_amount) : finalAmount;
+      const discountAmount = hasDiscount ? parseFloat(o.discount_amount) : 0;
+      
+      return {
+        id: o._id.toString(), 
+        orderNumber: o.order_number?.toString() || o._id.toString(), 
+        status: this.mapOrderStatus(o.status), 
+        date: new Date(o.created_at || o.date).toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'short', 
+          day: 'numeric', 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        }), 
+        total: finalAmount,
+        originalAmount: hasDiscount ? originalAmount : null,
+        discount: discountAmount,
+        couponCode: o.coupon_code || null,
+        estimatedDelivery: this.getEstimatedDelivery(o), 
+        items: (o.line_items || []).map(item => ({ 
+          name: item.product || item.title || 'Unknown Item', 
+          quantity: item.quantity || 1, 
+          price: parseFloat(item.price || 0),
+          specialInstructions: item.specialInstructions || null
+        }))
+      };
+    });
+    
+    return { 
+      aiText: '', 
+      intent: 'ORDER_STATUS', 
+      productList: [], 
+      addToCart: null, 
+      cartData: null, 
+      orderData: { 
+        type: 'order_tracking', 
+        orders: orderList 
+      }, 
+      meta: { 
+        //suggestions: ['Place new order', 'View Menu'], 
+        timestamp: new Date().toISOString() 
+      } 
+    };
+  } catch (error) {
+    console.error('[Agent] Order status error:', error);
+    return { 
+      aiText: "I couldn't load your orders. Please try again.", 
+      intent: 'ORDER_STATUS', 
+      productList: [], 
+      addToCart: null, 
+      cartData: null, 
+      orderData: null, 
+      meta: { 
+        suggestions: ['Try again', 'View Menu'], 
+        timestamp: new Date().toISOString() 
+      } 
+    };
   }
+}
 
   async handleTrackOrder(customerId, message, entities) {
-    const orderId = entities.orderId || message.match(/\d{4,}/)?.[0];
-    if (!orderId) {
-      return { aiText: "Please provide an order number to track. Example: 'Track order 12345'", intent: 'TRACK_ORDER', productList: [], cartData: null, orderData: null, meta: { suggestions: ['View order history', 'View Menu'], timestamp: new Date().toISOString() } };
+  const orderId = entities.orderId || message.match(/\d{4,}/)?.[0];
+  if (!orderId) {
+    return { 
+      aiText: "Please provide an order number to track. Example: 'Track order 12345'", 
+      intent: 'TRACK_ORDER', 
+      productList: [], 
+      cartData: null, 
+      orderData: null, 
+      meta: { 
+        suggestions: ['View order history', 'View Menu'], 
+        timestamp: new Date().toISOString() 
+      } 
+    };
+  }
+  
+  try {
+    const order = await Order.findOne({ 
+      order_number: parseInt(orderId), 
+      $or: [{ group_id: customerId }, { customer_id: customerId }] 
+    }).lean();
+    
+    if (!order) {
+      return { 
+        aiText: `Order #${orderId} not found. Please check the order number or view your order history.`, 
+        intent: 'TRACK_ORDER', 
+        productList: [], 
+        cartData: null, 
+        orderData: null, 
+        meta: { 
+          suggestions: ['View order history', 'Check another order'], 
+          timestamp: new Date().toISOString() 
+        } 
+      };
     }
-    try {
-      const order = await Order.findOne({ order_number: parseInt(orderId), $or: [{ group_id: customerId }, { customer_id: customerId }] }).lean();
-      if (!order) {
-        return { aiText: `Order #${orderId} not found. Please check the order number or view your order history.`, intent: 'TRACK_ORDER', productList: [], cartData: null, orderData: null, meta: { suggestions: ['View order history', 'Check another order'], timestamp: new Date().toISOString() } };
+
+    // ✅ Extract discount info - handle missing fields
+    const discountAmount = order.discount_amount ? parseFloat(order.discount_amount) : 0;
+    const hasDiscount = discountAmount > 0;
+    const finalAmount = parseFloat(order.amount || 0);
+    const originalAmount = order.original_amount ? parseFloat(order.original_amount) : finalAmount;
+    const couponCode = order.coupon_code || null;
+
+    console.log('[Agent] 🔍 Order discount info:', {
+      orderId,
+      discount_amount: order.discount_amount,
+      original_amount: order.original_amount,
+      coupon_code: order.coupon_code,
+      hasDiscount,
+      discountAmount
+    });
+
+    // ✅ Format order details with discount info
+    const orderDetails = { 
+      id: order._id.toString(), 
+      orderNumber: order.order_number.toString(),
+      status: this.mapOrderStatus(order.status), 
+      date: new Date(order.created_at || order.date).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric', 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      }), 
+      total: finalAmount,
+      originalAmount: hasDiscount ? originalAmount : null,
+      discount: hasDiscount ? discountAmount : null, // ✅ Only include if > 0
+      couponCode: hasDiscount ? couponCode : null, // ✅ Only include if discount exists
+      estimatedDelivery: this.getEstimatedDelivery(order), 
+      items: (order.line_items || []).map(item => ({ 
+        name: item.product || item.title || 'Unknown Item', 
+        quantity: item.quantity || 1, 
+        price: parseFloat(item.price || 0),
+        specialInstructions: item.specialInstructions || null
+      })) 
+    };
+    
+    // ✅ Build detailed text message
+    const statusText = this.getStatusText(orderDetails.status);
+    let responseText = `📦 **Order #${order.order_number}**\n\nStatus: ${statusText}\nDate: ${orderDetails.date}\n`;
+    
+    if (hasDiscount) {
+      responseText += `\n💰 Payment:\nOriginal: $${originalAmount.toFixed(2)}\nDiscount${couponCode ? ` (${couponCode})` : ''}: -$${discountAmount.toFixed(2)}\nTotal Paid: $${finalAmount.toFixed(2)}\n`;
+    } else {
+      responseText += `Total: $${orderDetails.total.toFixed(2)}\n`;
+    }
+    
+    responseText += `\n**Items (${orderDetails.items.length}):**\n`;
+    orderDetails.items.forEach((item, idx) => { 
+      responseText += `${idx + 1}. ${item.name} x${item.quantity} - $${(item.price * item.quantity).toFixed(2)}`;
+      if (item.specialInstructions) {
+        responseText += `\n   📝 ${item.specialInstructions}`;
       }
-
-      
-      const orderDetails = { id: order._id.toString(), orderNumber: order.order_number, status: this.mapOrderStatus(order.status), date: new Date(order.created_at || order.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }), total: parseFloat(order.amount || 0), estimatedDelivery: this.getEstimatedDelivery(order), items: (order.line_items || []).map(item => ({ name: item.product || item.title || 'Unknown Item', quantity: item.quantity || 1, price: parseFloat(item.price || 0) })) };
-      const statusText = this.getStatusText(orderDetails.status);
-      let responseText = `📦 **Order #${order.order_number}**\n\nStatus: ${statusText}\nDate: ${orderDetails.date}\nTotal: $${orderDetails.total.toFixed(2)}\n\n**Items (${orderDetails.items.length}):**\n`;
-      orderDetails.items.forEach((item, idx) => { responseText += `${idx + 1}. ${item.name} x${item.quantity} - $${(item.price * item.quantity).toFixed(2)}\n`; });
-      if (orderDetails.estimatedDelivery) { responseText += `\n⏰ Estimated delivery: ${orderDetails.estimatedDelivery}`; }
-      return { aiText: responseText, intent: 'TRACK_ORDER', productList: [], cartData: null, orderData: { type: 'order_tracking', orders: [orderDetails] }, meta: { suggestions: ['View all orders'], timestamp: new Date().toISOString() } };
-    } catch (error) {
-      console.error('[Agent] Track order error:', error);
-      return { aiText: `Error retrieving order #${orderId}. Please try again.`, intent: 'TRACK_ORDER', productList: [], cartData: null, orderData: null, meta: { suggestions: ['Try again', 'View order history'], timestamp: new Date().toISOString() } };
+      responseText += `\n`;
+    });
+    
+    if (orderDetails.estimatedDelivery) { 
+      responseText += `\n⏰ Estimated delivery: ${orderDetails.estimatedDelivery}`; 
     }
+    
+    console.log('[Agent] ✅ Order details prepared with discount:', {
+      orderNumber: orderDetails.orderNumber,
+      hasDiscount,
+      discount: discountAmount.toFixed(2),
+      coupon: couponCode || 'None'
+    });
+    
+    return { 
+      aiText: responseText, 
+      intent: 'TRACK_ORDER', 
+      productList: [], 
+      cartData: null, 
+      orderData: { 
+        type: 'order_tracking', 
+        orders: [orderDetails] 
+      }, 
+      meta: { 
+        //suggestions: ['View all orders', 'Place new order', 'Reorder ' + orderId], 
+        timestamp: new Date().toISOString() 
+      } 
+    };
+  } catch (error) {
+    console.error('[Agent] Track order error:', error);
+    return { 
+      aiText: `Error retrieving order #${orderId}. Please try again.`, 
+      intent: 'TRACK_ORDER', 
+      productList: [], 
+      cartData: null, 
+      orderData: null, 
+      meta: { 
+        suggestions: ['Try again', 'View order history'], 
+        timestamp: new Date().toISOString() 
+      } 
+    };
   }
+}
 
-  mapOrderStatus(status) {
-    const statusMap = { 'CONFIRMED': 'preparing', 'PREPARING': 'preparing', 'READY': 'ready', 'OUT_FOR_DELIVERY': 'out_for_delivery', 'DELIVERED': 'delivered', 'CANCELLED': 'cancelled' };
-    return statusMap[status?.toUpperCase()] || 'preparing';
-  }
+mapOrderStatus(status) {
+  const statusMap = { 
+    'CONFIRMED': 'preparing', 
+    'PREPARING': 'preparing', 
+    'READY': 'ready', 
+    'OUT_FOR_DELIVERY': 'out_for_delivery', 
+    'DELIVERED': 'delivered', 
+    'CANCELLED': 'cancelled' 
+  };
+  return statusMap[status?.toUpperCase()] || 'preparing';
+}
 
-  getEstimatedDelivery(order) {
-    if (order.status === 'DELIVERED') return null;
-    const orderDate = new Date(order.created_at || order.date);
-    const estimatedTime = new Date(orderDate.getTime() + 45 * 60000);
-    return estimatedTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  }
+getEstimatedDelivery(order) {
+  if (order.status === 'DELIVERED') return null;
+  const orderDate = new Date(order.created_at || order.date);
+  const estimatedTime = new Date(orderDate.getTime() + 45 * 60000);
+  return estimatedTime.toLocaleTimeString('en-US', { 
+    hour: '2-digit', 
+    minute: '2-digit' 
+  });
+}
 
-  getStatusText(status) {
-    const statusTexts = { 'preparing': '🍳 Being prepared', 'ready': '✅ Ready for pickup', 'out_for_delivery': '🚚 Out for delivery', 'delivered': '✅ Delivered', 'cancelled': '❌ Cancelled' };
-    return statusTexts[status] || 'Processing';
-  }
+getStatusText(status) {
+  const statusTexts = { 
+    'preparing': '🍳 Being prepared', 
+    'ready': '✅ Ready for pickup', 
+    'out_for_delivery': '🚚 Out for delivery', 
+    'delivered': '✅ Delivered', 
+    'cancelled': '❌ Cancelled' 
+  };
+  return statusTexts[status] || 'Processing';
+}
 
   async handleReorder(customerId, message, entities) {
   const orderId = entities.orderId || message.match(/\d{4,}/)?.[0];
