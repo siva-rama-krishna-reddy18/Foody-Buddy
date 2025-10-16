@@ -1,200 +1,147 @@
-// src/stores/useChatStore.ts
 import { create } from 'zustand';
-import { api } from '../services/api/ApiClient';
+import { socket } from '../lib/socket';
 import { useCartStore } from './useCartStore';
-import type { ChatMessage, Product } from '../types';
+import type { ChatMessage } from '../types';
 
-interface ChatSession {
+interface CartItem {
   id: string;
-  customer_id: string;
-  title: string;
-  created_at: string;
-  updated_at: string;
+  name: string;
+  price: number;
+  quantity: number;
 }
 
 interface ChatState {
   messages: ChatMessage[];
   isLoading: boolean;
-  currentSession: ChatSession | null;
-  customerId: string | null;
-  sessionId: string;
+  aiThinking: boolean;
   error: string | null;
-  
-  // Actions
-  setCustomerId: (customerId: string) => void;
-  sendMessage: (text: string) => Promise<void>;
-  sendQuickAction: (action: string) => Promise<void>;
-  addProductToCart: (product: Product) => Promise<void>;
-  clearMessages: () => void;
+
+  cart: CartItem[];
+  addToCart: (item: CartItem) => void;
+  removeFromCart: (id: string) => void;
+  clearCart: () => void;
+
+  sendMessage: (text: string, customerId: string) => Promise<void>;
   initializeChat: (customerId: string) => void;
-  addMessage: (message: ChatMessage) => void;
-  clearError: () => void;
+  clearMessages: () => void;
 }
 
-export const useChatStore = create<ChatState>((set, get) => ({
+export const useChatStore = create<ChatState>((set) => ({
   messages: [],
   isLoading: false,
-  currentSession: null,
-  customerId: null,
-  sessionId: crypto.randomUUID(),
+  aiThinking: false,
   error: null,
 
-  setCustomerId: (customerId: string) => {
-    set({ customerId });
-  },
+  cart: [],
+
+  addToCart: (item) =>
+    set((state) => {
+      const existing = state.cart.find((i) => i.id === item.id);
+      if (existing) {
+        return {
+          cart: state.cart.map((i) =>
+            i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i
+          ),
+        };
+      }
+      return { cart: [...state.cart, { ...item, quantity: 1 }] };
+    }),
+
+  removeFromCart: (id) =>
+    set((state) => ({
+      cart: state.cart.filter((item) => item.id !== id),
+    })),
+
+  clearCart: () => set({ cart: [] }),
 
   initializeChat: (customerId: string) => {
-    set({ 
-      customerId,
-      sessionId: crypto.randomUUID(),
-      messages: [{
-        text: "Welcome to FoodyBuddy! I'm here to help you order amazing food. What can I do for you today?",
-        sender: 'other',
-        type: 'welcome',
-        suggestions: ['View Menu', 'Track Orders', "Today's Specials", 'Show my cart'],
-        timestamp: new Date(),
-        id: crypto.randomUUID()
-      }],
-      error: null
+    console.log('[Chat] Initializing chat for customer:', customerId);
+    
+    socket.off('bot-message');
+    
+    socket.on('bot-message', (data) => {
+      console.log('[Chat] Received bot-message:', data);
+      
+      // ✅ Clear cart on payment success
+      if (data.intent === 'PAYMENT_SUCCESS') {
+        console.log('💳 [Chat] Payment successful, clearing cart store');
+        useCartStore.getState().clearCart('');
+      }
+      
+      // ✅ Update cart store when cart data arrives
+      if (data.cart) {
+        console.log('🛒 [Chat] Updating cart store with:', data.cart);
+        useCartStore.getState().updateFromChatData(data.cart);
+      } else if (data.intent === 'REMOVE_FROM_CART' || 
+                 data.intent === 'DECREASE_QUANTITY' ||
+                 data.intent === 'VIEW_CART') {
+        console.log('🛒 [Chat] Cart-related intent but no cart data - clearing cart');
+        useCartStore.getState().updateFromChatData(null);
+      }
+      
+      const botMessage: ChatMessage = {
+        id: `bot-${Date.now()}`,
+        text: data.text || '',
+        sender: 'bot',
+        timestamp: data.timestamp || new Date().toISOString(),
+        products: data.products || [],
+        suggestions: data.suggestions || [],
+        cartData: data.cart || undefined,
+        orderData: data.orderData || undefined,
+        payment: data.payment || undefined,
+      };
+
+      set(state => ({
+        messages: [...state.messages, botMessage],
+        isLoading: false,
+        aiThinking: false
+      }));
+    });
+
+    socket.on('connect', () => {
+      console.log('[Chat] Socket connected');
+    });
+
+    socket.on('disconnect', () => {
+      console.log('[Chat] Socket disconnected');
     });
   },
 
-  sendMessage: async (text: string) => {
-    const { customerId, sessionId } = get();
+  sendMessage: async (text: string, customerId: string) => {
+    // ✅ Check if message is JSON - if so, don't display it in chat
+    const isJSON = text.trim().startsWith('{') && text.trim().endsWith('}');
     
-    if (!customerId) {
-      set({ error: 'Customer ID not set' });
-      return;
-    }
-
-    // Add user message immediately
-    const userMessage: ChatMessage = {
-      text: text.trim(),
-      sender: 'me',
-      timestamp: new Date(),
-      id: crypto.randomUUID()
-    };
-
-    set(state => ({
-      messages: [...state.messages, userMessage],
-      isLoading: true,
-      error: null
-    }));
-
-    try {
-      const response = await api.chat.sendAIMessage({
-        text: text.trim(),
-        customerId,
-        sessionId
-      });
-
-      if (response.success) {
-         console.log('🔍 Full API Response:', response);
-  console.log('🔍 API Response data:', response.data);
-  console.log('🔍 CartData from API:', response.data.cartData);
-  console.log('🔍 OrderData from API:', response.data.orderData);
-  console.log('🔍 OrderData type:', typeof response.data.orderData);
-        const botMessage: ChatMessage = {
-          text: response.data.cartData ? '' : response.data.aiText,
-          sender: 'other',
-          timestamp: new Date(),
-          id: crypto.randomUUID(),
-          intent: response.data.intent,
-          products: response.data.productList,
-          suggestions: response.data.meta.suggestions,
-          payment: response.data.payment,
-          cartData: response.data.cartData,
-          orderData: response.data.orderData
-        };
-        console.log('🔍 Created botMessage:', botMessage);
-        console.log('🔍 BotMessage orderData:', botMessage.orderData);
-
-        set(state => ({
-          messages: [...state.messages, botMessage],
-          isLoading: false
-        }));
-
-
-        // Update cart if cart data is provided
-        if (response.data.addToCart) {
-          useCartStore.getState().updateFromChatData(response.data.addToCart);
-        }
-      } else {
-        throw new Error('Failed to get AI response');
-      }
-
-    } catch (error) {
-      console.error('Chat error:', error);
-      
-      const errorMessage: ChatMessage = {
-        text: "Sorry, I'm having trouble right now. Please try again in a moment.",
-        sender: 'other',
-        timestamp: new Date(),
-        id: crypto.randomUUID()
+    if (!isJSON) {
+      // Only add to chat if it's NOT JSON
+      const userMessage: ChatMessage = {
+        id: `user-${Date.now()}`,
+        text,
+        sender: 'user',
+        timestamp: new Date().toISOString(),
       };
 
       set(state => ({
-        messages: [...state.messages, errorMessage],
-        isLoading: false,
-        error: 'Failed to send message'
+        messages: [...state.messages, userMessage],
+        isLoading: true,
+        aiThinking: true,
+        error: null
       }));
-    }
-  },
-
-  sendQuickAction: async (action: string) => {
-    await get().sendMessage(action);
-  },
-
-  addProductToCart: async (product: Product) => {
-    const { customerId } = get();
-    
-    if (!customerId) {
-      set({ error: 'Customer ID not set' });
-      return;
-    }
-
-    try {
-      await useCartStore.getState().addItem(customerId, product.id, 1);
-      
-      // Add confirmation message
-      const confirmMessage: ChatMessage = {
-        text: `Added ${product.name} to your cart! ($${product.price})`,
-        sender: 'other',
-        timestamp: new Date(),
-        id: crypto.randomUUID()
-      };
-
+    } else {
+      // For JSON messages, just set loading state without adding message
+      console.log('[Chat] 📦 Sending JSON data (not displaying in chat)');
       set(state => ({
-        messages: [...state.messages, confirmMessage]
-      }));
-
-    } catch (error) {
-      console.error('Add to cart error:', error);
-      
-      const errorMessage: ChatMessage = {
-        text: `Sorry, I couldn't add ${product.name} to your cart. Please try again.`,
-        sender: 'other',
-        timestamp: new Date(),
-        id: crypto.randomUUID()
-      };
-
-      set(state => ({
-        messages: [...state.messages, errorMessage]
+        isLoading: true,
+        aiThinking: true,
+        error: null
       }));
     }
+
+    socket.emit('chat-message', {
+      customerId,
+      message: text,
+      sessionId: socket.id
+    });
   },
 
-  addMessage: (message: ChatMessage) => {
-    set(state => ({
-      messages: [...state.messages, message]
-    }));
-  },
-
-  clearMessages: () => {
-    set({ messages: [], error: null });
-  },
-
-  clearError: () => {
-    set({ error: null });
-  }
+  clearMessages: () => set({ messages: [], error: null })
 }));

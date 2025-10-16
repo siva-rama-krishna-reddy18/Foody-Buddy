@@ -8,14 +8,18 @@ import type {
   OrderItem
 } from '../../types';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:3000';
+
 class ChatService {
   async getHistory(sessionId: string) {
-    console.log('Fetching chat history for session:', sessionId);
-    await new Promise(r => setTimeout(r, 300));
-    return [
-      { text: `Welcome to chat session ${sessionId}!`, sender: 'other' as const },
-      { text: 'Thanks, happy to be here.', sender: 'me' as const },
-    ];
+    const apiUrl = `${API_BASE_URL}/api/v1/chat/sessions/${sessionId}/messages`;
+    const res = await fetch(apiUrl);
+    
+    if (!res.ok) {
+      throw new Error(`Failed to get chat history: ${res.status}`);
+    }
+    
+    return res.json();
   }
 
   async sendAIMessage(data: {
@@ -23,17 +27,9 @@ class ChatService {
     customerId: string;
     sessionId: string;
   }): Promise<ChatResponse> {
-    const apiUrl = `${import.meta.env.VITE_API_BASE_URL}/api/v1/chat/chat`;
-    console.log('Calling API:', apiUrl);
-    
-    // ✅ FIXED: Match backend expectations exactly
-    const requestBody = {
-      sessionId: data.sessionId,
-      customerId: data.customerId,  // ✅ Top-level field as expected by backend
-      text: data.text               // ✅ Use 'text' field as expected by backend
-    };
-    
-    console.log('Request body:', requestBody);
+    const apiUrl = `${API_BASE_URL}/api/v1/chat/chat`;
+    console.log('📡 Calling API:', apiUrl);
+    console.log('📤 Request:', data);
     
     const res = await fetch(apiUrl, {
       method: 'POST',
@@ -41,20 +37,50 @@ class ChatService {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify({
+        sessionId: data.sessionId,
+        customerId: data.customerId,
+        text: data.text
+      })
     });
     
-    console.log('API Response status:', res.status);
+    console.log('📥 Response status:', res.status);
     
     if (!res.ok) {
       const errorText = await res.text();
-      console.error('API Error response:', errorText);
+      console.error('❌ API Error:', errorText);
       throw new Error(`API call failed: ${res.status} - ${errorText}`);
     }
     
     const result = await res.json();
-    console.log('API Response data:', result);
+    console.log('✅ API Response:', result);
     return result;
+  }
+
+  async createSession(customerId: string, title?: string) {
+    const apiUrl = `${API_BASE_URL}/api/v1/chat/sessions`;
+    const res = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customerId, title })
+    });
+    
+    if (!res.ok) {
+      throw new Error(`Failed to create session: ${res.status}`);
+    }
+    
+    return res.json();
+  }
+
+  async getSessions(customerId: string) {
+    const apiUrl = `${API_BASE_URL}/api/v1/chat/sessions?customerId=${customerId}`;
+    const res = await fetch(apiUrl);
+    
+    if (!res.ok) {
+      throw new Error(`Failed to get sessions: ${res.status}`);
+    }
+    
+    return res.json();
   }
 }
 
@@ -64,8 +90,7 @@ class CartService {
     productId: string;
     quantity: number;
   }) {
-    const apiUrl = `${import.meta.env.VITE_API_BASE_URL}/api/v1/orders/cart/add`;
-    console.log('Add to cart API:', apiUrl);
+    const apiUrl = `${API_BASE_URL}/api/v1/orders/cart/add`;
     
     const res = await fetch(apiUrl, {
       method: 'POST',
@@ -81,7 +106,7 @@ class CartService {
   }
 
   async getCart(customerId: string) {
-    const apiUrl = `${import.meta.env.VITE_API_BASE_URL}/api/v1/orders/cart/${customerId}`;
+    const apiUrl = `${API_BASE_URL}/api/v1/orders/cart/${customerId}`;
     const res = await fetch(apiUrl);
     
     if (!res.ok) {
@@ -95,9 +120,9 @@ class CartService {
     customerId: string;
     productId: string;
     quantity: number;
-    cartItemId?: string;
   }) {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/orders/cart/update`, {
+    const apiUrl = `${API_BASE_URL}/api/v1/orders/cart/update`;
+    const res = await fetch(apiUrl, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -105,13 +130,14 @@ class CartService {
     
     if (!res.ok) {
       const errorText = await res.text();
-      throw new Error(`Failed to update cart item: ${res.status} - ${errorText}`);
+      throw new Error(`Failed to update cart: ${res.status} - ${errorText}`);
     }
     return res.json();
   }
 
   async removeFromCart(customerId: string, productId: string) {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/orders/cart/${customerId}/${productId}`, {
+    const apiUrl = `${API_BASE_URL}/api/v1/orders/cart/${customerId}/${productId}`;
+    const res = await fetch(apiUrl, {
       method: 'DELETE'
     });
     
@@ -123,7 +149,8 @@ class CartService {
   }
 
   async clearCart(customerId: string) {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/orders/cart/${customerId}`, {
+    const apiUrl = `${API_BASE_URL}/api/v1/orders/cart/${customerId}`;
+    const res = await fetch(apiUrl, {
       method: 'DELETE'
     });
     
@@ -143,7 +170,8 @@ class OrderService {
     paymentMethod?: string;
     specialInstructions?: string;
   }): Promise<OrderResponse> {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/orders/place`, {
+    const apiUrl = `${API_BASE_URL}/api/v1/orders/place`;
+    const res = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -157,7 +185,8 @@ class OrderService {
   }
 
   async getOrderHistory(customerId: string, limit = 10, offset = 0) {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/orders/history/${customerId}?limit=${limit}&offset=${offset}`);
+    const apiUrl = `${API_BASE_URL}/api/v1/orders/history/${customerId}?limit=${limit}&offset=${offset}`;
+    const res = await fetch(apiUrl);
     
     if (!res.ok) {
       const errorText = await res.text();
@@ -167,7 +196,8 @@ class OrderService {
   }
 
   async getOrderDetails(orderId: string) {
-    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/orders/${orderId}`);
+    const apiUrl = `${API_BASE_URL}/api/v1/orders/${orderId}`;
+    const res = await fetch(apiUrl);
     
     if (!res.ok) {
       const errorText = await res.text();
@@ -186,6 +216,22 @@ export class ApiClient {
     this.chat = new ChatService();
     this.cart = new CartService();
     this.orders = new OrderService();
+  }
+
+  // Test backend connection
+  async testConnection() {
+    try {
+      const res = await fetch(`${API_BASE_URL}/health`);
+      if (res.ok) {
+        const data = await res.json();
+        console.log('✅ Backend connection successful:', data);
+        return data;
+      }
+      throw new Error('Backend not responding');
+    } catch (error) {
+      console.error('❌ Backend connection failed:', error);
+      throw error;
+    }
   }
 }
 

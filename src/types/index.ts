@@ -3,10 +3,30 @@ export interface Product {
   id: string;
   name: string;
   price: number;
+  image?: string;
   description?: string;
   category?: string;
   image_url?: string;
 }
+export interface PaymentData {
+  total: number;
+  subtotal?: number;        // ✅ Add optional
+  discount?: number;         // ✅ Add optional
+  coupon?: {                 // ✅ Add optional
+    code: string;
+    discount: number;
+    description: string;
+  };
+  specialInstructions?: {    // ✅ Add optional
+    [key: string]: string;
+  };
+  items: Array<{
+    name: string;
+    quantity: number;
+    price: number;
+  }>;
+}
+
 
 export interface CartItem {
   id: string;
@@ -43,21 +63,31 @@ export interface OrderTrackingData {
 export interface ChatMessage {
   id?: string;
   text: string;
-  sender: 'me' | 'bot' | 'other';
-  timestamp?: Date;
+  sender: 'me' | 'bot' | 'user';
+  timestamp?: string |Date;
   products?: Product[];
   suggestions?: string[];
   type?: string;
   intent?: string;
   payment?: {
     total: number;
+    subtotal?: number;           // ✅ ADD THIS
+    discount?: number;            // ✅ ADD THIS
+    coupon?: {                    // ✅ ADD THIS
+      code: string;
+      discount: number;
+      description: string;
+    };
+    specialInstructions?: {       // ✅ ADD THIS
+      [productId: string]: string;
+    };
     items: Array<{
       name: string;
       quantity: number;
       price: number;
     }>;
   };
-  cartData?: {  // ADD THIS FIELD
+  cartData?: {
     type: 'cart_display';
     cartItems: Array<{
       id: string;
@@ -69,7 +99,7 @@ export interface ChatMessage {
     }>;
     cartTotal: number;
   };
-   orderData?: OrderTrackingData;
+  orderData?: OrderTrackingData;
 }
 
 export interface ChatResponse {

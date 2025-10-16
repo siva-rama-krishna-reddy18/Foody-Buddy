@@ -1,8 +1,9 @@
-// src/components/chat/MessageBubble.tsx
-import React, { useState } from 'react';
-import { ShoppingCart, Star, CreditCard, Lock, CheckCircle, Plus, Minus, Trash2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ShoppingCart, Star, CreditCard, Lock, CheckCircle, Plus, Minus, Trash2, Package, Truck, Clock, MoreHorizontal, RotateCcw } from 'lucide-react';
 import type { ChatMessage, Product } from '../../types/index';
-import { Package, Truck, Clock, MoreHorizontal, RotateCcw } from 'lucide-react';
+import { socket } from '../../lib/socket';
+import { useChatStore } from '../../stores/useChatStore';
+import { useCartStore } from '../../stores/useCartStore';
 
 interface OrderItem {
   id: string;
@@ -10,11 +11,15 @@ interface OrderItem {
   status: 'preparing' | 'ready' | 'out_for_delivery' | 'delivered' | 'cancelled';
   date: string;
   total: number;
+  originalAmount?: number;
+  discount?: number;
+  couponCode?: string;
   estimatedDelivery?: string;
   items: Array<{
     name: string;
     quantity: number;
     price: number;
+    specialInstructions?: string;
   }>;
 }
 
@@ -26,10 +31,10 @@ interface OrderTrackingData {
 interface CartItem {
   id: string;
   productId: string;
-  name: string;
+  title: string;
   price: number;
   quantity: number;
-  total: number;
+  image?: string;
 }
 
 interface CartDisplay {
@@ -39,17 +44,31 @@ interface CartDisplay {
   cartTotal: number;
 }
 
-interface PaymentComponentProps {
-  orderTotal: number;
-  orderItems: Array<{
+interface PaymentData {
+  total: number;
+  subtotal?: number;
+  discount?: number;
+  coupon?: {
+    code: string;
+    discount: number;
+    description: string;
+  };
+  specialInstructions?: {
+    [key: string]: string;
+  };
+  items: Array<{
     name: string;
     quantity: number;
     price: number;
   }>;
-  onPaymentSuccess: () => void;
-  onCancel: () => void;
 }
 
+interface Props {
+  message: ChatMessage;
+  customerId: string;
+}
+
+// Order Tracking Component
 const OrderTrackingComponent = ({ 
   orderData, 
   onReorderClick, 
@@ -61,20 +80,36 @@ const OrderTrackingComponent = ({
   onViewDetailsClick?: (orderId: string) => void;
   onSuggestionClick?: (suggestion: string) => void;
 }) => {
+  if (!orderData || !orderData.orders || !Array.isArray(orderData.orders)) {
+    return (
+      <div className="bg-gray-50 rounded-lg p-4 mt-2">
+        <p className="text-gray-600 text-center">No orders available</p>
+      </div>
+    );
+  }
+
+  if (orderData.orders.length === 0) {
+    return (
+      <div className="bg-gray-50 rounded-lg p-4 mt-2">
+        <p className="text-gray-600 text-center">You don't have any orders yet</p>
+        <button
+          onClick={() => onSuggestionClick?.('View Menu')}
+          className="mt-3 w-full bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded-lg text-sm font-medium transition-colors"
+        >
+          Browse Menu
+        </button>
+      </div>
+    );
+  }
+
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'preparing':
-        return <Clock className="w-4 h-4 text-orange-500" />;
-      case 'ready':
-        return <Package className="w-4 h-4 text-blue-500" />;
-      case 'out_for_delivery':
-        return <Truck className="w-4 h-4 text-purple-500" />;
-      case 'delivered':
-        return <CheckCircle className="w-4 h-4 text-green-500" />;
-      case 'cancelled':
-        return <MoreHorizontal className="w-4 h-4 text-red-500" />;
-      default:
-        return <Clock className="w-4 h-4 text-gray-500" />;
+      case 'preparing': return <Clock className="w-4 h-4 text-orange-500" />;
+      case 'ready': return <Package className="w-4 h-4 text-blue-500" />;
+      case 'out_for_delivery': return <Truck className="w-4 h-4 text-purple-500" />;
+      case 'delivered': return <CheckCircle className="w-4 h-4 text-green-500" />;
+      case 'cancelled': return <MoreHorizontal className="w-4 h-4 text-red-500" />;
+      default: return <Clock className="w-4 h-4 text-gray-500" />;
     }
   };
 
@@ -100,80 +135,127 @@ const OrderTrackingComponent = ({
     }
   };
 
+  const isDetailedView = orderData.orders.length === 1;
+
   return (
     <div className="bg-gray-50 rounded-lg p-4 mt-2">
       <h3 className="font-semibold text-gray-800 mb-4 flex items-center">
         <Package className="w-5 h-5 mr-2" />
-        Your Recent Orders
+        {isDetailedView ? 'Order Details' : 'Your Recent Orders'}
       </h3>
       
       <div className="space-y-3">
-        {orderData.orders.map((order) => (
-          <div key={order.id} className="bg-white rounded-lg border shadow-sm overflow-hidden">
-            {/* Order Header */}
-            <div className="p-4 border-b border-gray-100">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center space-x-2">
-                  {getStatusIcon(order.status)}
-                  <span className="font-medium text-gray-900">
-                    Order #{order.orderNumber}
+        {orderData.orders.map((order) => {
+          const orderItems = order.items || [];
+          const orderTotal = order.total || 0;
+          const hasDiscount = order.discount != null && order.discount > 0;
+          const originalAmount = order.originalAmount || orderTotal;
+          
+          return (
+            <div key={order.id} className="bg-white rounded-lg border shadow-sm overflow-hidden">
+              <div className="p-4 border-b border-gray-100">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center space-x-2">
+                    {getStatusIcon(order.status)}
+                    <span className="font-medium text-gray-900">Order #{order.orderNumber}</span>
+                  </div>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(order.status)}`}>
+                    {getStatusText(order.status)}
                   </span>
                 </div>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(order.status)}`}>
-                  {getStatusText(order.status)}
-                </span>
-              </div>
-              
-              <div className="flex items-center justify-between text-sm text-gray-600">
-                <span>{order.date}</span>
-                <span className="font-semibold text-gray-900">${order.total.toFixed(2)}</span>
-              </div>
-              
-              {order.estimatedDelivery && order.status !== 'delivered' && (
-                <div className="mt-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                  Est. delivery: {order.estimatedDelivery}
-                </div>
-              )}
-            </div>
-            
-            {/* Order Items */}
-            <div className="p-4">
-              <div className="space-y-2 mb-3">
-                {order.items.map((item, index) => (
-                  <div key={index} className="flex justify-between text-sm">
-                    <span className="text-gray-700">
-                      {item.quantity}x {item.name}
-                    </span>
-                    <span className="text-gray-600">
-                      ${(item.price * item.quantity).toFixed(2)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              
-              {/* Action Buttons */}
-              <div className="flex space-x-2">
-                <button
-                  onClick={() => onReorderClick?.(order.orderNumber || order.id)}
-                  className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 py-2 px-3 rounded-lg text-sm font-medium flex items-center justify-center space-x-1 transition-colors"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  <span>Reorder</span>
-                </button>
                 
-                <button
-                  onClick={() => onViewDetailsClick?.(order.orderNumber || order.id)}
-                  className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-600 py-2 px-3 rounded-lg text-sm font-medium transition-colors"
-                >
-                  View Details
-                </button>
+                <div className="flex items-center justify-between text-sm text-gray-600">
+                  <span>{order.date}</span>
+                  <span className="font-semibold text-gray-900">${orderTotal.toFixed(2)}</span>
+                </div>
+                
+                {order.estimatedDelivery && order.status !== 'delivered' && (
+                  <div className="mt-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                    Est. delivery: {order.estimatedDelivery}
+                  </div>
+                )}
+              </div>
+              
+              <div className="p-4">
+                {!isDetailedView && (
+                  <div className="mb-3">
+                    <p className="text-sm text-gray-700">
+                      {orderItems.map((item, i) => (
+                        <span key={i}>
+                          {item.quantity}x {item.name}
+                          {i < orderItems.length - 1 ? ', ' : ''}
+                        </span>
+                      ))}
+                    </p>
+                  </div>
+                )}
+
+                {isDetailedView && (
+                  <div className="space-y-2 mb-3">
+                    {orderItems.map((item, index) => {
+                      const itemPrice = typeof item.price === 'number' ? item.price : parseFloat(String(item.price)) || 0;
+                      const itemQuantity = typeof item.quantity === 'number' ? item.quantity : parseInt(String(item.quantity)) || 1;
+                      
+                      return (
+                        <div key={index}>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-700">
+                              {itemQuantity}x {item.name || 'Unknown Item'}
+                            </span>
+                            <span className="text-gray-600">${(itemPrice * itemQuantity).toFixed(2)}</span>
+                          </div>
+                          {(item as any).specialInstructions && (
+                            <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded mt-1">
+                              📝 {(item as any).specialInstructions}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                
+                {isDetailedView && hasDiscount && (
+                  <div className="border-t border-gray-200 pt-3 mb-3 space-y-2 text-sm bg-green-50 p-3 rounded-lg">
+                    <div className="flex justify-between text-gray-700">
+                      <span>Subtotal:</span>
+                      <span className="font-medium">${originalAmount.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-green-600 font-semibold">
+                      <span>💚 Discount {order.couponCode ? `(${order.couponCode})` : ''}:</span>
+                      <span>-${order.discount!.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-gray-900 border-t border-gray-300 pt-2">
+                      <span>Total Paid:</span>
+                      <span className="text-green-600">${orderTotal.toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="flex space-x-2 mt-3">
+                  <button
+                    onClick={() => onReorderClick?.(order.orderNumber || order.id)}
+                    className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 py-2 px-3 rounded-lg text-sm font-medium flex items-center justify-center space-x-1 transition-colors"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>Reorder</span>
+                  </button>
+                  
+                  {!isDetailedView && (
+                    <button
+                      onClick={() => onViewDetailsClick?.(order.orderNumber || order.id)}
+                      className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-600 py-2 px-3 rounded-lg text-sm font-medium transition-colors"
+                    >
+                      View Details
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       
-      {/* Quick Actions */}
       <div className="mt-4 pt-4 border-t border-gray-200">
         <div className="flex space-x-2">
           <button
@@ -194,11 +276,25 @@ const OrderTrackingComponent = ({
   );
 };
 
-const PaymentChatComponent: React.FC<PaymentComponentProps> = ({
+// Payment Component
+const PaymentComponent = ({
   orderTotal,
+  orderSubtotal = 0,
+  orderDiscount = 0,
+  orderCoupon,
+  specialInstructions = {},
   orderItems,
   onPaymentSuccess,
   onCancel
+}: {
+  orderTotal: number;
+  orderSubtotal?: number;
+  orderDiscount?: number;
+  orderCoupon?: { code: string; discount: number; description: string };
+  specialInstructions?: { [key: string]: string };
+  orderItems: Array<{ name: string; quantity: number; price: number }>;
+  onPaymentSuccess: () => void;
+  onCancel: () => void;
 }) => {
   const [paymentStep, setPaymentStep] = useState<'review' | 'payment' | 'processing' | 'success'>('review');
   const [formData, setFormData] = useState({
@@ -239,20 +335,25 @@ const PaymentChatComponent: React.FC<PaymentComponentProps> = ({
   };
 
   const handleProcessPayment = async () => {
+    console.log('💳 Processing payment...');
     setPaymentStep('processing');
     
-    // Simulate payment processing - replace with actual payment integration
     setTimeout(() => {
+      console.log('✅ Payment processed, showing success');
       setPaymentStep('success');
+      
       setTimeout(() => {
+        console.log('🎉 Calling onPaymentSuccess');
         onPaymentSuccess();
-      }, 2000);
-    }, 3000);
+
+        useCartStore.getState().clearCart('');
+      }, 1500);
+    }, 2000);
   };
 
   if (paymentStep === 'processing') {
     return (
-      <div className="bg-white rounded-2xl rounded-bl-md p-4 shadow-sm border max-w-sm mt-2">
+      <div className="bg-white rounded-2xl p-4 shadow-sm border max-w-sm mt-2">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-3"></div>
           <p className="text-gray-600 text-sm">Processing your payment...</p>
@@ -264,7 +365,7 @@ const PaymentChatComponent: React.FC<PaymentComponentProps> = ({
 
   if (paymentStep === 'success') {
     return (
-      <div className="bg-white rounded-2xl rounded-bl-md p-4 shadow-sm border max-w-sm mt-2">
+      <div className="bg-white rounded-2xl p-4 shadow-sm border max-w-sm mt-2">
         <div className="text-center">
           <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
           <h3 className="font-semibold text-green-600 mb-2">Payment Successful!</h3>
@@ -276,8 +377,11 @@ const PaymentChatComponent: React.FC<PaymentComponentProps> = ({
   }
 
   if (paymentStep === 'review') {
+    const hasDiscount = orderDiscount && orderDiscount > 0;
+    const hasInstructions = specialInstructions && Object.keys(specialInstructions).length > 0;
+
     return (
-      <div className="bg-white rounded-2xl rounded-bl-md p-4 shadow-sm border max-w-sm mt-2">
+      <div className="bg-white rounded-2xl p-4 shadow-sm border max-w-sm mt-2">
         <h3 className="font-semibold mb-3 flex items-center">
           <CreditCard className="w-4 h-4 mr-2" />
           Order Summary
@@ -290,22 +394,48 @@ const PaymentChatComponent: React.FC<PaymentComponentProps> = ({
               <span>${(item.price * item.quantity).toFixed(2)}</span>
             </div>
           ))}
-          <div className="border-t pt-2 font-semibold flex justify-between">
-            <span>Total:</span>
-            <span>${orderTotal.toFixed(2)}</span>
+          
+          {hasInstructions && (
+            <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded text-xs">
+              <p className="font-semibold text-blue-800 mb-1">📝 Special Instructions:</p>
+              {Object.entries(specialInstructions || {}).map(([productId, instruction]) => 
+                instruction ? (
+                  <p key={productId} className="text-blue-700 mt-1">{instruction}</p>
+                ) : null
+              )}
+            </div>
+          )}
+          
+          <div className="border-t pt-2 space-y-1 mt-3">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">Subtotal:</span>
+              <span className="font-medium">${(orderSubtotal || orderTotal).toFixed(2)}</span>
+            </div>
+            
+            {hasDiscount && (
+              <div className="flex justify-between text-sm text-green-600 font-medium">
+                <span>Discount {orderCoupon ? `(${orderCoupon.code})` : ''}:</span>
+                <span>-${orderDiscount.toFixed(2)}</span>
+              </div>
+            )}
+            
+            <div className="font-bold flex justify-between pt-2 border-t text-base">
+              <span>Total:</span>
+              <span className="text-green-600">${orderTotal.toFixed(2)}</span>
+            </div>
           </div>
         </div>
 
         <div className="flex space-x-2">
           <button
             onClick={() => setPaymentStep('payment')}
-            className="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg text-sm font-medium"
+            className="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg text-sm font-medium transition-colors"
           >
             Proceed to Payment
           </button>
           <button
             onClick={onCancel}
-            className="px-4 py-2 text-gray-500 hover:text-gray-700 text-sm"
+            className="px-4 py-2 text-gray-500 hover:text-gray-700 text-sm font-medium transition-colors"
           >
             Cancel
           </button>
@@ -315,14 +445,12 @@ const PaymentChatComponent: React.FC<PaymentComponentProps> = ({
   }
 
   return (
-    <div className="bg-white rounded-2xl rounded-bl-md p-4 shadow-sm border max-w-sm mt-2">
+    <div className="bg-white rounded-2xl p-4 shadow-sm border max-w-sm mt-2">
       <h3 className="font-semibold mb-3 flex items-center">
         <Lock className="w-4 h-4 mr-2 text-green-500" />
         Secure Payment - ${orderTotal.toFixed(2)}
-      </h3>
-
+      </h3 >
       <div className="space-y-3">
-        {/* Card Information */}
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Card Number</label>
           <input
@@ -360,7 +488,6 @@ const PaymentChatComponent: React.FC<PaymentComponentProps> = ({
           </div>
         </div>
 
-        {/* Cardholder Information */}
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Cardholder Name</label>
           <input
@@ -405,7 +532,6 @@ const PaymentChatComponent: React.FC<PaymentComponentProps> = ({
           />
         </div>
 
-        {/* Payment Buttons */}
         <div className="flex space-x-2 pt-2">
           <button
             onClick={handleProcessPayment}
@@ -430,239 +556,453 @@ const PaymentChatComponent: React.FC<PaymentComponentProps> = ({
   );
 };
 
-// Cart Display Component with Quantity Controls
-const CartDisplayComponent = ({ cartData, onUpdateQuantity, onRemoveItem, onSuggestionClick }: {
-  cartData: CartDisplay;
-  onUpdateQuantity?: (productId: string, action: 'increase' | 'decrease') => void;
-  onRemoveItem?: (productId: string) => void;
-  onSuggestionClick?: (suggestion: string) => void;
+// Cart Display Component
+// Cart Display Component
+const CartDisplayComponent = ({
+  cartData,
+  customerId,
+  onSuggestionClick
+}: {
+  cartData: any;
+  customerId: string;
+  onSuggestionClick: (action: string) => void;
 }) => {
-  return (
-    <div className="bg-gray-50 rounded-lg p-4 mt-2">
-      <h3 className="font-semibold text-gray-800 mb-3">Your Cart</h3>
-      
-      <div className="space-y-3">
-        {cartData.cartItems.map((item) => (
-          <div key={item.id} className="flex items-center justify-between bg-white rounded-lg p-3 shadow-sm">
-            <div className="flex-1">
-              <p className="font-medium text-gray-800">{item.name}</p>
-              <p className="text-sm text-gray-600">${item.price.toFixed(2)} each</p>
-            </div>
-            
-            <div className="flex items-center space-x-3">
-              {/* Quantity Controls */}
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => onUpdateQuantity?.(item.productId, 'decrease')}
-                  className="w-8 h-8 rounded-full bg-red-100 hover:bg-red-200 text-red-600 font-bold flex items-center justify-center transition-colors"
-                  title="Decrease quantity"
-                >
-                  <Minus className="w-4 h-4" />
-                </button>
-                
-                <span className="w-8 text-center font-semibold text-gray-800">
-                  {item.quantity}
-                </span>
-                
-                <button
-                  onClick={() => onUpdateQuantity?.(item.productId, 'increase')}
-                  className="w-8 h-8 rounded-full bg-green-100 hover:bg-green-200 text-green-600 font-bold flex items-center justify-center transition-colors"
-                  title="Increase quantity"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
-              
-              {/* Item Total */}
-              <div className="text-right min-w-[60px]">
-                <p className="font-semibold text-gray-800">${item.total.toFixed(2)}</p>
-              </div>
-              
-              {/* Remove Button */}
-              <button
-                onClick={() => onRemoveItem?.(item.productId)}
-                className="w-8 h-8 rounded-full bg-gray-100 hover:bg-red-100 text-gray-600 hover:text-red-600 flex items-center justify-center transition-colors"
-                title="Remove item"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        ))}
+  const cartStoreInstructions = useCartStore((state) => state.specialInstructions);
+  const [specialInstructions, setSpecialInstructions] = useState<{[key: string]: string}>({});
+  const [couponCode, setCouponCode] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
+  const [couponError, setCouponError] = useState('');
+
+  useEffect(() => {
+    if (cartStoreInstructions) {
+      setSpecialInstructions(cartStoreInstructions);
+    }
+  }, [cartStoreInstructions]);
+
+  const cartStoreCoupon = useCartStore((state) => state.coupon);
+
+  useEffect(() => {
+    if (cartStoreCoupon) {
+      setAppliedCoupon(cartStoreCoupon);
+      setCouponCode(cartStoreCoupon.code);
+    }
+  }, [cartStoreCoupon]);
+  
+  if (!cartData) {
+    return null;
+  }
+
+  const items = cartData.cartItems || [];
+  
+  // ✅ Calculate the actual subtotal from items
+  const calculatedSubtotal = items.reduce((sum: number, item: any) => {
+    const price = parseFloat(item.unit_price || item.price || 0);
+    const quantity = parseInt(item.quantity || 1);
+    return sum + (price * quantity);
+  }, 0);
+
+  // ✅ Get values from cart store
+  const cartStoreSubtotal = useCartStore((state) => state.subtotal);
+  const cartStoreDiscount = useCartStore((state) => state.discount);
+  const cartStoreTotal = useCartStore((state) => state.total);
+
+  // ✅ Use cart store values if available (after coupon applied), otherwise calculate
+  const subtotal = cartStoreSubtotal > 0 ? cartStoreSubtotal : calculatedSubtotal;
+  const discount = cartStoreDiscount > 0 ? cartStoreDiscount : 0;  // ✅ Use cart store discount
+  const total = cartStoreTotal > 0 ? cartStoreTotal : subtotal;     // ✅ Use cart store total
+
+  console.log('🛒 Cart Data:', cartData);
+  console.log('🛒 Cart Items:', items);
+  console.log('💰 Calculations:', { 
+    calculatedSubtotal,
+    cartStoreSubtotal,
+    cartStoreDiscount,
+    cartStoreTotal,
+    subtotal, 
+    discount, 
+    total, 
+    appliedCoupon 
+  });
+
+  if (items.length === 0) {
+    return (
+      <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-200">
+        <p className="text-gray-600 text-center">Your cart is empty</p>
       </div>
+    );
+  }
+
+  const handleApplyCoupon = () => {
+    if (!couponCode.trim()) {
+      setCouponError('Please enter a coupon code');
+      return;
+    }
+
+    // ✅ Send message to backend to apply coupon
+    onSuggestionClick(`apply coupon ${couponCode.toUpperCase()}`);
+  };
+
+  const handleRemoveCoupon = () => {
+  // ✅ Send message to backend to remove coupon
+  onSuggestionClick('remove coupon');
+  
+  // Clear local state
+  setAppliedCoupon(null);
+  setCouponCode('');
+  setCouponError('');
+};
+
+  const handleUpdateQuantity = (productId: string, action: 'increase' | 'decrease') => {
+    console.log('🔼 Updating quantity:', { productId, action });
+    socket.emit('update-cart-quantity', { customerId, productId, action });
+  };
+
+  const handleRemoveItem = (productId: string) => {
+    console.log('🗑️ Removing item:', productId);
+    socket.emit('remove-from-cart', { customerId, productId });
+  };
+
+  const handleProceedToCheckout = () => {
+    const checkoutData = {
+      action: 'Proceed to pay',
+      specialInstructions,
+      coupon: appliedCoupon
+    };
+    onSuggestionClick(JSON.stringify(checkoutData));
+  };
+
+  return (
+    <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-200 max-w-md">
+      <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+        <ShoppingCart className="w-5 h-5" />
+        Your Cart
+      </h3>
+
+      <div className="space-y-3">
+        {items.map((item: any, index: number) => {
+          // ✅ Fix: Handle different property names from backend
+          const itemName = item.title || item.name || item.product || 'Unknown Item';
+          const itemPrice = parseFloat(item.unit_price || item.price || 0);
+          const itemQuantity = parseInt(item.quantity || 1);
+          const itemTotal = itemPrice * itemQuantity;
+          const itemImage = item.image || item.imageUrl;
+          const itemId = item.productId || item.id;
+
+          console.log('📦 Cart Item:', {
+            itemName,
+            itemPrice,
+            itemQuantity,
+            itemTotal,
+            itemId,
+            rawItem: item
+          });
+
+          return (
+            <div key={item.id || index} className="border-b pb-3">
+              <div className="flex items-center gap-3">
+                {itemImage && (
+                  <img 
+                    src={itemImage} 
+                    alt={itemName} 
+                    className="w-16 h-16 object-cover rounded-md"
+                    onError={(e) => { 
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none'; 
+                    }}
+                  />
+                )}
+
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-semibold text-sm truncate">{itemName}</h4>
+                  <p className="text-gray-600 text-xs">${itemPrice.toFixed(2)} each</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleUpdateQuantity(itemId, 'decrease')}
+                    className="w-7 h-7 rounded-full bg-red-100 hover:bg-red-200 text-red-600 flex items-center justify-center transition-colors"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  
+                  <span className="w-8 text-center font-semibold">{itemQuantity}</span>
+                  
+                  <button
+                    onClick={() => handleUpdateQuantity(itemId, 'increase')}
+                    className="w-7 h-7 rounded-full bg-green-100 hover:bg-green-200 text-green-600 flex items-center justify-center transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="text-right">
+                  <p className="font-semibold text-sm">${itemTotal.toFixed(2)}</p>
+                </div>
+
+                <button
+                  onClick={() => handleRemoveItem(itemId)}
+                  className="text-red-500 hover:text-red-700 p-1"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="mt-2">
+  <input
+    type="text"
+    placeholder="Special instructions (optional)"
+    value={specialInstructions[itemId] || ''}
+    onChange={(e) => {
+      const newInstructions = {
+        ...specialInstructions,
+        [itemId]: e.target.value
+      };
+      setSpecialInstructions(newInstructions);
       
-      {/* Cart Total */}
-      <div className="border-t border-gray-200 mt-4 pt-3">
-        <div className="flex justify-between items-center">
-          <span className="text-lg font-semibold text-gray-800">Total:</span>
-          <span className="text-xl font-bold text-green-600">${cartData.cartTotal.toFixed(2)}</span>
+      // ✅ Sync to cart store
+      useCartStore.getState().setSpecialInstructions(newInstructions);
+    }}
+    className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+  />
+</div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 pt-4 border-t border-gray-200">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Have a coupon code?
+        </label>
+        
+        {!appliedCoupon ? (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Enter coupon code"
+              value={couponCode}
+              onChange={(e) => {
+                setCouponCode(e.target.value.toUpperCase());
+                setCouponError('');
+              }}
+              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              onClick={handleApplyCoupon}
+              className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              Apply
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-3">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 text-green-600" />
+              <div>
+                <p className="text-sm font-semibold text-green-800">{appliedCoupon.code}</p>
+                <p className="text-xs text-green-600">{appliedCoupon.description}</p>
+              </div>
+            </div>
+            <button
+              onClick={handleRemoveCoupon}
+              className="text-red-500 hover:text-red-700 text-sm"
+            >
+              Remove
+            </button>
+          </div>
+        )}
+        
+        {couponError && (
+          <p className="text-xs text-red-500 mt-1">{couponError}</p>
+        )}
+      </div>
+
+      <div className="mt-4 pt-4 border-t border-gray-200 space-y-2">
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-600">Subtotal:</span>
+          <span className="font-medium">${subtotal.toFixed(2)}</span>
+        </div>
+        
+        {appliedCoupon && (
+          <div className="flex justify-between text-sm text-green-600">
+            <span>Discount ({appliedCoupon.discount}%):</span>
+            <span>-${discount.toFixed(2)}</span>
+          </div>
+        )}
+        
+        <div className="flex justify-between items-center pt-2 border-t">
+          <span className="font-bold text-lg">Total:</span>
+          <span className="font-bold text-xl text-green-600">${total.toFixed(2)}</span>
         </div>
       </div>
-      
-      {/* Checkout Button */}
-      <button
-        onClick={() => onSuggestionClick?.('Proceed to pay')}
-        className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
-      >
-        Proceed to Checkout
-      </button>
+
+      <div className="space-y-2 mt-4">
+        <button
+          onClick={handleProceedToCheckout}
+          className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+        >
+          <CreditCard className="w-5 h-5" />
+          Proceed to Checkout (${total.toFixed(2)})
+        </button>
+        
+        <button
+          onClick={() => onSuggestionClick('Add more items')}
+          className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg font-medium transition-colors"
+        >
+          Add More Items
+        </button>
+      </div>
     </div>
   );
 };
 
-interface Props {
-  message: ChatMessage;
-  onAddToCart?: (product: Product) => void;
-  onSuggestionClick?: (suggestion: string) => void;
-  onPaymentSuccess?: () => void;
-  onUpdateCartQuantity?: (productId: string, action: 'increase' | 'decrease') => void;
-  onRemoveFromCart?: (productId: string) => void;
-  customerId?: string;
-}
-
-export default function MessageBubble({ 
-  message, 
-  onAddToCart, 
-  onSuggestionClick, 
-  onPaymentSuccess,
-  onUpdateCartQuantity,
-  onRemoveFromCart 
-}: Props) {
-  const { text, sender, products, suggestions, type, payment } = message;
-  const isMe = sender === 'me';
-
-  // Check if this is a cart display message
+// Main MessageBubble Component
+export default function MessageBubble({ message, customerId }: Props) {
+  const { sendMessage } = useChatStore();
+  const { text, sender, products, suggestions } = message;
   const cartData = (message as any).cartData as CartDisplay | undefined;
-  // Check if this is an order tracking message
   const orderData = (message as any).orderData as OrderTrackingData | undefined;
+  const payment = (message as any).payment as PaymentData | undefined;
 
-  console.log('MessageBubble - message:', message);
-  console.log('MessageBubble - cartData:', cartData);
-  console.log('MessageBubble - orderData:', orderData);
+  // ✅ Fixed: Proper type checking
+  const isUser = sender === 'user' || sender === 'me';
+  const isBot = sender === 'bot';
+  
+  const handleSuggestionClick = (suggestion: string) => {
+    sendMessage(suggestion, customerId);
+  };
+
+  const handleAddToCart = (product: Product) => {
+    sendMessage(`add ${product.name} to cart`, customerId);
+  };
 
   const handlePaymentSuccess = () => {
-    onPaymentSuccess?.();
-    // You can also trigger a message to show order confirmation
-    onSuggestionClick?.('Payment completed successfully! Your order is being prepared.');
+    console.log('🎉 Payment success handler called');
+    sendMessage('PAYMENT SUCCESSFUL.PREPARING YOUR ORDER', customerId);
   };
 
   const handlePaymentCancel = () => {
-    onSuggestionClick?.('Payment cancelled. Let me know if you need help with anything else!');
+    sendMessage('Payment cancelled', customerId);
   };
 
   return (
-    <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-2 sm:mb-4`}>
-      <div className="max-w-[85%] sm:max-w-[80%]">
-        {/* Main message bubble - DON'T show text if we have cartData or orderData */}
-        {!(cartData && !isMe) && !(orderData && !isMe) && text.trim() && (
-          <div
-            className={`px-3 py-2 sm:px-4 sm:py-3 rounded-2xl shadow-sm text-sm sm:text-base ${
-              isMe 
-                ? 'bg-blue-500 text-white rounded-br-md' 
-                : 'bg-white text-gray-800 rounded-bl-md border'
-            }`}
-          >
-            <p className="text-sm leading-relaxed whitespace-pre-line">{text}</p>
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div className={`flex items-start space-x-3 max-w-2xl ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}>
+        {/* Avatar */}
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+          isBot 
+            ? 'bg-gradient-to-br from-orange-500 to-orange-600' 
+            : 'bg-gradient-to-br from-purple-500 to-purple-700'
+        }`}>
+          <span className="text-white font-bold text-sm">
+            {isBot ? 'FB' : 'TU'}
+          </span>
+        </div>
+
+        {/* Message Content */}
+        <div className={`flex-1 ${isUser ? 'text-right' : ''}`}>
+          <div className={`flex items-center space-x-2 mb-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+            <span className="text-sm font-semibold text-gray-700">
+              {isBot ? 'Foody Buddy Assistant' : 'Test User'}
+            </span>
+            <span className="text-xs text-gray-400">
+              {message.timestamp ? new Date(message.timestamp).toLocaleTimeString('en-US', { 
+                hour: 'numeric', 
+                minute: '2-digit' 
+              }) : ''}
+            </span>
           </div>
-        )}
 
-        {/* Cart Display Component */}
-        {cartData && !isMe && (
-          <CartDisplayComponent 
-            cartData={cartData}
-            onUpdateQuantity={onUpdateCartQuantity}
-            onRemoveItem={onRemoveFromCart}
-            onSuggestionClick={onSuggestionClick}
-          />
-        )}
+          {/* Text Message */}
+          {!(cartData && !isUser) && !(orderData && !isUser) && text && text.trim() && (
+            <div className={`p-4 rounded-2xl ${
+              isBot 
+                ? 'bg-gray-100 text-gray-800' 
+                : 'bg-gray-200 text-gray-800'
+            }`}>
+              <p className="text-sm leading-relaxed">{text}</p>
+            </div>
+          )}
 
-        {/* Order Tracking Component */}
-        {orderData && !isMe && (
-          <OrderTrackingComponent 
-            orderData={orderData}
-            onReorderClick={(orderId) => onSuggestionClick?.(`Reorder ${orderId}`)}
-            onViewDetailsClick={(orderId) => onSuggestionClick?.(`Show details for order ${orderId}`)}
-            onSuggestionClick={onSuggestionClick}
-          />
-        )}
+          {/* Product List */}
+{/* Product List */}
+{products && products.length > 0 && (
+  <div className="mt-3 grid grid-cols-2 gap-3">
+    {products.map((product) => (
+      <div 
+        key={`${product.id}-${product.name}`}  // ✅ More stable key
+        className="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md transition-shadow"
+      >
+        <img 
+          src={product.image || 'https://via.placeholder.com/150'} 
+          alt={product.name}
+          className="w-full h-32 object-cover rounded-lg mb-3"
+          onError={(e) => {
+            const target = e.target as HTMLImageElement;
+            target.src = 'https://via.placeholder.com/150';
+          }}
+        />
+        <h3 className="font-semibold text-gray-900 mb-1">{product.name}</h3>
+        <p className="text-orange-600 font-bold mb-3">${product.price}</p>
+        <button 
+          onClick={() => handleAddToCart(product)}
+          className="w-full py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-medium"
+        >
+          Add to Cart
+        </button>
+      </div>
+    ))}
+  </div>
+)}
 
-        {/* Payment Component */}
-        {payment && !isMe && (
-          <PaymentChatComponent
-            orderTotal={payment.total}
-            orderItems={payment.items}
-            onPaymentSuccess={handlePaymentSuccess}
-            onCancel={handlePaymentCancel}
-          />
-        )}
+          {/* Cart Display */}
+          {cartData && !isUser && (
+            <CartDisplayComponent 
+              cartData={cartData}
+              customerId={customerId}
+              onSuggestionClick={handleSuggestionClick}
+            />
+          )}
 
-        {/* Products */}
-        {products && products.length > 0 && (
-          <div className="mt-2 sm:mt-3 space-y-2">
-            {products.map((product) => (
-              <div
-                key={product.id}
-                className="bg-white rounded-xl border p-3 shadow-sm"
-              >
-                <div className="flex justify-between items-start">
-                  <div className="flex-1 pr-2">
-                    <h4 className="font-medium text-gray-900 text-sm sm:text-base mb-1">
-                      {product.name}
-                    </h4>
-                    {product.description && (
-                      <p className="text-xs sm:text-sm text-gray-600 mb-2 line-clamp-2">
-                        {product.description}
-                      </p>
-                    )}
-                    <div className="flex items-center justify-between">
-                      <span className="text-base sm:text-lg font-semibold text-blue-600">
-                        ${product.price}
-                      </span>
-                      <div className="flex items-center text-xs text-gray-500">
-                        <Star className="w-3 h-3 fill-yellow-400 text-yellow-400 mr-1" />
-                        4.5
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => onAddToCart?.(product)}
-                    className="bg-blue-500 hover:bg-blue-600 text-white px-2 sm:px-3 py-1 sm:py-2 rounded-lg flex items-center space-x-1 text-xs sm:text-sm font-medium"
-                  >
-                    <ShoppingCart className="w-3 h-3" />
-                    <span>Add</span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+          {/* Order Tracking */}
+          {orderData && !isUser && (
+            <OrderTrackingComponent 
+              orderData={orderData}
+              onReorderClick={(orderId) => handleSuggestionClick(`Reorder ${orderId}`)}
+              onViewDetailsClick={(orderId) => handleSuggestionClick(`Show details for order ${orderId}`)}
+              onSuggestionClick={handleSuggestionClick}
+            />
+          )}
 
-        {/* Quick Actions */}
-        {(suggestions && suggestions.length > 0) || type === 'welcome' ? (
-          <div className="mt-2 sm:mt-3 flex flex-wrap gap-2">
-            {(suggestions || ['View Menu', 'Track Orders', "Today's Specials"]).map((suggestion) => (
-              <button
-                key={suggestion}
-                onClick={() => onSuggestionClick?.(suggestion)}
-                className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 sm:px-3 py-1 sm:py-2 rounded-full text-xs sm:text-sm font-medium transition-colors border"
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-        ) : null}
+          {/* Payment */}
+          {payment && !isUser && (
+            <PaymentComponent
+              orderTotal={payment.total}
+              orderSubtotal={payment.subtotal}
+              orderDiscount={payment.discount}
+              orderCoupon={payment.coupon}
+              specialInstructions={payment.specialInstructions}
+              orderItems={payment.items}
+              onPaymentSuccess={handlePaymentSuccess}
+              onCancel={handlePaymentCancel}
+            />
+          )}
 
-        {/* Timestamp */}
-        {message.timestamp && (
-          <p className={`text-[10px] sm:text-xs mt-1 ${
-            isMe ? 'text-right text-gray-500' : 'text-gray-500'
-          }`}>
-            {new Date(message.timestamp).toLocaleTimeString([], { 
-              hour: '2-digit', 
-              minute: '2-digit' 
-            })}
-          </p>
-        )}
+          {/* Suggestions */}
+          {suggestions && suggestions.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {suggestions.map((suggestion, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSuggestionClick(suggestion)}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full text-sm font-medium transition-colors"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,14 +1,18 @@
+// src/services/socket/socketService.ts
 import { io, Socket } from 'socket.io-client';
 
 let socket: Socket | null = null;
+const WS_URL = import.meta.env.VITE_WS_URL || 'http://127.0.0.1:3000';
 
-export function connectSocket() {
-  // FIXED: Use http:// instead of ws:// for Socket.IO
-  // const WS_URL = import.meta.env.VITE_WS_URL;
-  const WS_URL = 'http://127.0.0.1:3001';
-  
+export function connectSocket(customerId: string) {
+  if (socket) {
+    return socket; // Already connected
+  }
+
+  console.log('🔌 Connecting to WebSocket:', WS_URL);
+
   socket = io(WS_URL, { 
-    transports: ['websocket', 'polling'], // Allow both transports for reliability
+    transports: ['websocket', 'polling'],
     autoConnect: true,
     reconnection: true,
     reconnectionDelay: 1000,
@@ -17,29 +21,34 @@ export function connectSocket() {
   });
 
   socket.on('connect', () => {
-    console.log('Connected to WebSocket server');
+    console.log('✅ Connected to WebSocket server');
     console.log('Socket ID:', socket?.id);
     
-    // Authenticate immediately after connection
-    socket?.emit('authenticate', { 
-      phoneNumber: '+1234567890' // Replace with actual phone number
+    // Identify with backend
+    socket?.emit('identify', { 
+      customerId: customerId
     });
   });
 
-  socket.on('authenticated', (data) => {
-    console.log('Authentication successful:', data);
+  socket.on('identified', (data) => {
+    console.log('✅ Identified:', data);
+  });
+
+  socket.on('message', (data) => {
+    console.log('📨 Message received:', data);
+    // Handle incoming messages
   });
 
   socket.on('disconnect', () => {
-    console.log('Disconnected from WebSocket server');
+    console.log('❌ Disconnected from WebSocket server');
   });
 
   socket.on('error', (error) => {
-    console.error('Socket error:', error);
+    console.error('❌ Socket error:', error);
   });
 
   socket.on('connect_error', (error) => {
-    console.error('Connection error:', error);
+    console.error('❌ Connection error:', error);
   });
 
   return socket;
@@ -53,18 +62,29 @@ export function disconnectSocket() {
   if (socket) {
     socket.disconnect();
     socket = null;
+    console.log('🔌 Socket disconnected');
   }
 }
 
-// Helper function to send messages
-export function sendMessage(message: string) {
+// Send chat message via WebSocket
+export function sendChatMessage(data: {
+  sessionId: string;
+  customerId: string;
+  text: string;
+}) {
   if (socket && socket.connected) {
-    socket.emit('message', { 
-      message: message,
-      timestamp: new Date()
-    });
-    console.log('Message sent:', message);
+    socket.emit('message', data);
+    console.log('📤 Message sent via WebSocket:', data);
+    return true;
   } else {
-    console.error('Socket not connected');
+    console.error('❌ Socket not connected');
+    return false;
+  }
+}
+
+// Listen for AI responses
+export function onAIResponse(callback: (data: any) => void) {
+  if (socket) {
+    socket.on('ai_response', callback);
   }
 }
