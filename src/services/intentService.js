@@ -7,6 +7,12 @@ async function classifyIntent(message) {
     
     console.log(`[Intent] Classifying: "${message}"`);
     
+    // ✅ CHECKOUT - JSON FORMAT - Check this FIRST before any other checks
+    if (message.trim().startsWith('{') && message.includes('"action"') && message.includes('Proceed to pay')) {
+      console.log('[Intent] ✅ Matched CHECKOUT (JSON format)');
+      return 'CHECKOUT';
+    }
+    
     // ✅ SILENT CART REQUEST
     if (message === 'get_cart_silent') {
       console.log('[Intent] ✅ SILENT CART REQUEST');
@@ -14,9 +20,39 @@ async function classifyIntent(message) {
     }
     
     // ✅ PAYMENT SUCCESS
-    if (message === 'PAYMENT_COMPLETE_CREATE_ORDER') {
-      console.log('[Intent] ✅ EXACT MATCH: PAYMENT_COMPLETE_CREATE_ORDER');
+    if (message === 'PAYMENT SUCCESSFUL.PREPARING YOUR ORDER') {
+      console.log('[Intent] ✅ EXACT MATCH: PAYMENT SUCCESSFUL.PREPARING YOUR ORDER');
       return 'PAYMENT_SUCCESS';
+    }
+    
+    // ✅ QUANTITY UPDATE - Add one more, increase quantity
+    if (/\b(add one more|add another|increase.*quantity)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched INCREASE_QUANTITY');
+      return 'ADD_TO_CART';
+    }
+    
+    // ✅ QUANTITY UPDATE - Remove one, decrease quantity
+    if (/\b(remove one|decrease.*quantity)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched DECREASE_QUANTITY');
+      return 'DECREASE_QUANTITY';
+    }
+    
+    // ✅ REMOVE ALL - Complete removal
+    if (/\b(remove all|remove product.*from cart)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched REMOVE_ALL');
+      return 'REMOVE_FROM_CART';
+    }
+    
+    // ✅ APPLY COUPON
+    if (/\b(apply coupon|use coupon|add coupon)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched APPLY_COUPON');
+      return 'APPLY_COUPON';
+    }
+
+    // ✅ REMOVE COUPON
+    if (/\b(remove coupon|delete coupon|clear coupon)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched REMOVE_COUPON');
+      return 'REMOVE_COUPON';
     }
     
     // ✅ REORDER
@@ -28,31 +64,31 @@ async function classifyIntent(message) {
     }
     
     // ✅ VIEW ORDER DETAILS
-    // In the TRACK_ORDER section, add more patterns
-if (/\b(show|view|see|details|status|check|track).*order.*\d{4,}\b/i.test(message) ||
-    /\border.*\d{4,}.*(show|view|see|details|status|check|track)\b/i.test(message) ||
-    /\bdetails.*of.*order.*\d{4,}\b/i.test(message) ||      // ✅ ADD THIS
-    /\bstatus.*of.*order.*\d{4,}\b/i.test(message)) {       // ✅ ADD THIS
-  console.log('[Intent] ✅ Matched TRACK_ORDER (view details)');
-  return 'TRACK_ORDER';
-}
+    if (/\b(show|view|see|details|status|check|track).*order.*\d{4,}\b/i.test(message) ||
+        /\border.*\d{4,}.*(show|view|see|details|status|check|track)\b/i.test(message) ||
+        /\bdetails.*of.*order.*\d{4,}\b/i.test(message) ||
+        /\bstatus.*of.*order.*\d{4,}\b/i.test(message)) {
+      console.log('[Intent] ✅ Matched TRACK_ORDER (view details)');
+      return 'TRACK_ORDER';
+    }
     
-    // Add near the Menu section
-if (/\b(menu|view.*menu|show.*menu|browse.*menu)\b/i.test(lowerMessage) ||
-    lowerMessage === 'add more items' ||           // ✅ ADD THIS
-    lowerMessage === 'browse items' ||             // ✅ ADD THIS
-    lowerMessage === 'shop more' ||                // ✅ ADD THIS
-    lowerMessage === 'continue shopping') {        // ✅ ADD THIS
-  console.log('[Intent] ✅ Matched RECOMMEND (menu)');
-  return 'RECOMMEND';
-}
+    // Menu patterns
+    if (/\b(menu|view.*menu|show.*menu|browse.*menu)\b/i.test(lowerMessage) ||
+        lowerMessage === 'add more items' ||
+        lowerMessage === 'browse items' ||
+        lowerMessage === 'shop more' ||
+        lowerMessage === 'continue shopping') {
+      console.log('[Intent] ✅ Matched RECOMMEND (menu)');
+      return 'RECOMMEND';
+    }
+    
     // Greeting patterns
     if (/^(hi|hello|hey|good morning|good evening|greetings)\b/i.test(lowerMessage)) {
       console.log('[Intent] ✅ Matched GREETING');
       return 'GREETING';
     }
     
-    // ✅ Track Orders - EXACT MATCHES FIRST (including "view all orders")
+    // ✅ Track Orders - EXACT MATCHES FIRST
     if (lowerMessage === 'track orders' || 
         lowerMessage === 'my orders' ||
         lowerMessage === 'order history' ||
@@ -60,9 +96,9 @@ if (/\b(menu|view.*menu|show.*menu|browse.*menu)\b/i.test(lowerMessage) ||
         lowerMessage === 'show my orders' ||
         lowerMessage === 'view my orders' ||
         lowerMessage === 'track this order' ||
-        lowerMessage === 'view all orders' ||  // ✅ ADD THIS
-        lowerMessage === 'show all orders' ||  // ✅ ADD THIS
-        lowerMessage === 'all orders') {        // ✅ ADD THIS
+        lowerMessage === 'view all orders' ||
+        lowerMessage === 'show all orders' ||
+        lowerMessage === 'all orders') {
       console.log('[Intent] ✅ Matched ORDER_STATUS (exact)');
       return 'ORDER_STATUS';
     }
@@ -71,8 +107,8 @@ if (/\b(menu|view.*menu|show.*menu|browse.*menu)\b/i.test(lowerMessage) ||
     if (/\btrack.*orders?\b/i.test(lowerMessage) ||
         /\bmy.*orders?\b/i.test(lowerMessage) ||
         /\border.*history\b/i.test(lowerMessage) ||
-        /\ball.*orders?\b/i.test(lowerMessage) ||  // ✅ ADD THIS
-        /\bview.*all.*orders?\b/i.test(lowerMessage)) {  // ✅ ADD THIS
+        /\ball.*orders?\b/i.test(lowerMessage) ||
+        /\bview.*all.*orders?\b/i.test(lowerMessage)) {
       console.log('[Intent] ✅ Matched ORDER_STATUS (pattern)');
       return 'ORDER_STATUS';
     }
@@ -92,12 +128,7 @@ if (/\b(menu|view.*menu|show.*menu|browse.*menu)\b/i.test(lowerMessage) ||
       return 'RECOMMEND';
     }
     
-    if (/\b(menu|view.*menu|show.*menu|browse.*menu)\b/i.test(lowerMessage)) {
-      console.log('[Intent] ✅ Matched RECOMMEND (menu)');
-      return 'RECOMMEND';
-    }
-    
-    // ✅ PLACE NEW ORDER - Should go to menu, not checkout
+    // ✅ PLACE NEW ORDER
     if (lowerMessage === 'place new order' || 
         lowerMessage === 'place another order' ||
         lowerMessage === 'order again') {
@@ -105,28 +136,31 @@ if (/\b(menu|view.*menu|show.*menu|browse.*menu)\b/i.test(lowerMessage) ||
       return 'RECOMMEND';
     }
     
-    // Checkout
+    // Checkout - REGULAR TEXT FORMAT
     if (/\b(checkout|pay|payment|proceed.*pay|complete.*order)\b/i.test(lowerMessage)) {
       console.log('[Intent] ✅ Matched CHECKOUT');
       return 'CHECKOUT';
     }
     
-    // Cart patterns
+    // Cart patterns - ADD TO CART
     if (/\b(add.*to.*cart|put.*in.*cart)\b/i.test(lowerMessage)) {
       console.log('[Intent] ✅ Matched ADD_TO_CART');
       return 'ADD_TO_CART';
     }
     
+    // VIEW CART
     if (/^(show.*cart|view.*cart|see.*cart|my.*cart|cart)$/i.test(lowerMessage)) {
       console.log('[Intent] ✅ Matched VIEW_CART');
       return 'VIEW_CART';
     }
     
+    // REMOVE FROM CART
     if (/\bremove.*from.*cart\b/i.test(lowerMessage)) {
       console.log('[Intent] ✅ Matched REMOVE_FROM_CART');
       return 'REMOVE_FROM_CART';
     }
     
+    // CLEAR CART
     if (/^(clear.*cart|empty.*cart|remove.*all)$/i.test(lowerMessage)) {
       console.log('[Intent] ✅ Matched CLEAR_CART');
       return 'CLEAR_CART';
@@ -161,6 +195,25 @@ function extractEntities(message) {
   const orderIdMatch = message.match(/\b(\d{4,})\b/);
   if (orderIdMatch) {
     entities.orderId = orderIdMatch[1];
+  }
+  
+  // Extract product ID if present
+  const productIdMatch = message.match(/product\s+([a-f0-9]{24})/i);
+  if (productIdMatch) {
+    entities.productId = productIdMatch[1];
+  }
+  
+  // ✅ Extract coupon code - FIXED to handle "apply coupon SAVE10"
+  if (message.toLowerCase().includes('coupon')) {
+    // Get the last word in the message
+    const words = message.trim().split(/\s+/);
+    const lastWord = words[words.length - 1];
+    
+    // Check if it's a valid coupon code format (uppercase letters/numbers)
+    if (/^[A-Z0-9]{4,}$/i.test(lastWord)) {
+      entities.couponCode = lastWord.toUpperCase();
+      console.log('[Entities] 💳 Extracted coupon code:', entities.couponCode);
+    }
   }
   
   return entities;

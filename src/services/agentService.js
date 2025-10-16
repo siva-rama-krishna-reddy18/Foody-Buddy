@@ -54,6 +54,10 @@ class AgentService {
         response = await this.handleViewCart(customerId);
         break;
 
+      case 'DECREASE_QUANTITY':
+  response = await this.handleDecreaseQuantity(customerId, message);
+  break;
+
       case 'REMOVE_FROM_CART':
         const removeEntities = await extractEntities(message);
         response = await this.handleRemoveFromCart(customerId, message, removeEntities);
@@ -62,6 +66,15 @@ class AgentService {
       case 'CLEAR_CART':
         response = await this.handleClearCart(customerId);
         break;
+
+      case 'APPLY_COUPON':
+  const applyCouponEntities = await extractEntities(message);
+  response = await this.handleApplyCoupon(customerId, message, applyCouponEntities);
+  break;
+
+case 'REMOVE_COUPON':
+  response = await this.handleRemoveCoupon(customerId);
+  break;
 
       case 'CHECKOUT':
         response = await this.handleCheckout(customerId, message); // ✅ Pass message here
@@ -242,6 +255,105 @@ class AgentService {
       };
     }
   }
+
+  async handleDecreaseQuantity(customerId, message) {
+  const products = await searchSimilar(message, 1);
+  if (products.length === 0) {
+    return {
+      aiText: "I couldn't find that item in your cart.",
+      intent: 'DECREASE_QUANTITY',
+      productList: [],
+      addToCart: null,
+      cartData: null,
+      meta: { suggestions: ['View cart', 'View Menu'], timestamp: new Date().toISOString() }
+    };
+  }
+
+  const product = products[0];
+  console.log('[Agent] Decreasing quantity for product:', product.id, product.name);
+
+  try {
+    const cart = await Cart.findOne({ customer_id: customerId });
+    if (!cart) {
+      return {
+        aiText: "Your cart is empty.",
+        intent: 'DECREASE_QUANTITY',
+        productList: [],
+        addToCart: null,
+        cartData: null,
+        meta: { suggestions: ['View Menu'], timestamp: new Date().toISOString() }
+      };
+    }
+
+    const cartItem = await CartItem.findOne({ 
+      cart_id: cart.id, 
+      productId: product.id 
+    });
+
+    if (!cartItem) {
+      return {
+        aiText: `${product.name} is not in your cart.`,
+        intent: 'DECREASE_QUANTITY',
+        productList: [],
+        addToCart: null,
+        cartData: null,
+        meta: { suggestions: ['View cart', 'View Menu'], timestamp: new Date().toISOString() }
+      };
+    }
+
+    if (cartItem.quantity <= 1) {
+      // Remove item if quantity would be 0
+      await CartItem.deleteOne({ _id: cartItem._id });
+      const updatedCart = await this.getCart(customerId);
+      
+      return {
+        aiText: `Removed ${product.name} from your cart.`,
+        intent: 'DECREASE_QUANTITY',
+        productList: [],
+        addToCart: null,
+        cartData: updatedCart.items.length > 0 ? {
+          text: '',
+          type: 'cart_display',
+          cartItems: updatedCart.cartItems,
+          cartTotal: updatedCart.cartTotal
+        } : null,
+        meta: { suggestions: ['Add more items', 'View Menu'], timestamp: new Date().toISOString() }
+      };
+    } else {
+      // Decrease quantity
+      cartItem.quantity -= 1;
+      cartItem.updated_at = new Date();
+      await cartItem.save();
+      
+      const updatedCart = await this.getCart(customerId);
+      
+      return {
+        aiText: `Updated ${product.name} quantity to ${cartItem.quantity}.`,
+        intent: 'DECREASE_QUANTITY',
+        productList: [],
+        addToCart: null,
+        cartData: {
+          text: '',
+          type: 'cart_display',
+          cartItems: updatedCart.cartItems,
+          cartTotal: updatedCart.cartTotal
+        },
+        meta: { suggestions: ['Proceed to pay', 'Add more items'], timestamp: new Date().toISOString() }
+      };
+    }
+
+  } catch (error) {
+    console.error('[Agent] Decrease quantity error:', error);
+    return {
+      aiText: "Sorry, couldn't update the quantity. Please try again.",
+      intent: 'DECREASE_QUANTITY',
+      productList: [],
+      addToCart: null,
+      cartData: null,
+      meta: { suggestions: ['Try again', 'View cart'], timestamp: new Date().toISOString() }
+    };
+  }
+}
 
   async handleViewCart(customerId) {
     const cart = await this.getCart(customerId);
@@ -928,6 +1040,141 @@ getStatusText(status) {
       return { aiText: "Error clearing cart. Please try again.", intent: 'CLEAR_CART', productList: [], cartData: null, meta: { suggestions: ['Try again', 'View cart'], timestamp: new Date().toISOString() } };
     }
   }
+  async handleApplyCoupon(customerId, message, entities) {
+  const couponCode = entities.couponCode || message.match(/[A-Z0-9]{5,}/)?.[0];
+  
+  if (!couponCode) {
+    return {
+      aiText: "Please provide a valid coupon code. Example: 'apply coupon SAVE10'",
+      intent: 'APPLY_COUPON',
+      productList: [],
+      cartData: null,
+      meta: { suggestions: ['View cart', 'Proceed to checkout'], timestamp: new Date().toISOString() }
+    };
+  }
+
+  try {
+    // ✅ Validate coupon (you can check database or hardcode valid coupons)
+    const validCoupons = {
+      'SAVE10': { code: 'SAVE10', discount: 10, description: '10% off your order' },
+      'SAVE20': { code: 'SAVE20', discount: 20, description: '20% off your order' },
+      'WELCOME': { code: 'WELCOME', discount: 15, description: '15% off for new customers' }
+    };
+
+    const coupon = validCoupons[couponCode.toUpperCase()];
+    
+    if (!coupon) {
+      return {
+        aiText: `Sorry, coupon code "${couponCode}" is not valid. Try SAVE10 or SAVE20.`,
+        intent: 'APPLY_COUPON',
+        productList: [],
+        cartData: null,
+        meta: { suggestions: ['View cart', 'Try another coupon'], timestamp: new Date().toISOString() }
+      };
+    }
+
+    // ✅ Get current cart
+    const cart = await this.getCart(customerId);
+    
+    if (!cart.items || cart.items.length === 0) {
+      return {
+        aiText: "Your cart is empty! Add some items first before applying a coupon.",
+        intent: 'APPLY_COUPON',
+        productList: [],
+        cartData: null,
+        meta: { suggestions: ['View Menu'], timestamp: new Date().toISOString() }
+      };
+    }
+
+    // ✅ Calculate discount
+    const subtotal = cart.total;
+    const discountAmount = subtotal * (coupon.discount / 100);
+    const newTotal = subtotal - discountAmount;
+
+    console.log('[Agent] ✅ Coupon applied:', {
+      code: coupon.code,
+      subtotal: subtotal,
+      discount: discountAmount,
+      total: newTotal
+    });
+
+    // ✅ Return cart with coupon
+    return {
+      aiText: `✅ Coupon ${coupon.code} applied! You saved $${discountAmount.toFixed(2)}`,
+      intent: 'APPLY_COUPON',
+      productList: [],
+      cartData: {
+        text: '',
+        type: 'cart_display',
+        cartItems: cart.cartItems,
+        cartTotal: newTotal,
+        subtotal: subtotal,
+        discount: discountAmount,
+        coupon: coupon
+      },
+      meta: { 
+        suggestions: ['Proceed to checkout', 'Remove coupon', 'Add more items'], 
+        timestamp: new Date().toISOString() 
+      }
+    };
+
+  } catch (error) {
+    console.error('[Agent] Apply coupon error:', error);
+    return {
+      aiText: "Error applying coupon. Please try again.",
+      intent: 'APPLY_COUPON',
+      productList: [],
+      cartData: null,
+      meta: { suggestions: ['Try again', 'View cart'], timestamp: new Date().toISOString() }
+    };
+  }
+}
+
+async handleRemoveCoupon(customerId) {
+  try {
+    const cart = await this.getCart(customerId);
+    
+    if (!cart.items || cart.items.length === 0) {
+      return {
+        aiText: "Your cart is empty!",
+        intent: 'REMOVE_COUPON',
+        productList: [],
+        cartData: null,
+        meta: { suggestions: ['View Menu'], timestamp: new Date().toISOString() }
+      };
+    }
+
+    // ✅ Return cart without coupon
+    return {
+      aiText: "Coupon removed from your cart.",
+      intent: 'REMOVE_COUPON',
+      productList: [],
+      cartData: {
+        text: '',
+        type: 'cart_display',
+        cartItems: cart.cartItems,
+        cartTotal: cart.total,
+        subtotal: cart.total,
+        discount: 0,
+        coupon: null
+      },
+      meta: { 
+        suggestions: ['Apply coupon', 'Proceed to checkout'], 
+        timestamp: new Date().toISOString() 
+      }
+    };
+
+  } catch (error) {
+    console.error('[Agent] Remove coupon error:', error);
+    return {
+      aiText: "Error removing coupon.",
+      intent: 'REMOVE_COUPON',
+      productList: [],
+      cartData: null,
+      meta: { suggestions: ['Try again'], timestamp: new Date().toISOString() }
+    };
+  }
+}
 
   async handleLearnPreference(customerId, message, entities) {
     return { aiText: "Thanks for sharing your preference! I'll remember that. 😊", intent: 'LEARN_PREFERENCE', productList: [], cartData: null, meta: { suggestions: ['View Menu', 'Show recommendations'], timestamp: new Date().toISOString() } };
