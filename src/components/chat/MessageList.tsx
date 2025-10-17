@@ -24,7 +24,7 @@ export default function MessageList() {
           >
             <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
               msg.sender === 'me' 
-                ? 'bg-blue-500 text-white' 
+                ? 'bg-blue-500 text-white'
                 : 'bg-white text-gray-800 border shadow-sm'
             }`}>
               <div className="text-xs opacity-75 mb-1">
