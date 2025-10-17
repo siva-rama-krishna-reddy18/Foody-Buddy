@@ -1,71 +1,231 @@
+/* src/index.css - COMPLETE VERSION WITH LAYOUT FIXES */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
-}
-
-/* Animations */
-@keyframes bounce {
-  0%, 100% {
-    transform: translateY(0);
+/* Base styles */
+@layer base {
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
-  50% {
-    transform: translateY(-10px);
+
+  code {
+    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+      monospace;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  * {
+    box-sizing: border-box;
   }
 }
 
-.animate-bounce {
-  animation: bounce 1s infinite;
+/* Custom components */
+@layer components {
+  #root {
+    width: 100%;
+    height: 100vh;
+  }
+
+  .App {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ✅ Logo consistency - all FB logos same size */
+  .foody-buddy-logo,
+  .fb-logo {
+    width: 56px;
+    height: 56px;
+    min-width: 56px;
+    min-height: 56px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(to bottom right, #f97316, #ea580c);
+    box-shadow: 0 4px 12px rgba(249, 115, 22, 0.25);
+  }
+
+  .foody-buddy-logo span,
+  .fb-logo span {
+    font-size: 24px;
+    font-weight: 700;
+    color: white;
+  }
+
+  /* ✅ Chat avatars - consistent size */
+  .chat-avatar,
+  .message-avatar {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ✅ User profile avatar */
+  .profile-avatar {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ✅ Welcome screen logo - larger */
+  .welcome-logo {
+    width: 128px;
+    height: 128px;
+    border-radius: 32px;
+    background: linear-gradient(to bottom right, #f97316, #ea580c);
+    box-shadow: 0 8px 24px rgba(249, 115, 22, 0.3);
+  }
 }
 
-/* Smooth scrolling */
-html {
-  scroll-behavior: smooth;
-}
+/* Custom utilities and animations */
+@layer utilities {
+  /* ✅ Smooth fade in animation for products */
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
+  /* ✅ Keep bounce ONLY for loading dots */
+  @keyframes bounce {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
 
-::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 4px;
-}
+  /* Apply bounce only to loading indicators */
+  .animate-bounce {
+    animation: bounce 1s infinite;
+  }
 
-::-webkit-scrollbar-thumb {
-  background: #888;
-  border-radius: 4px;
-}
+  /* ✅ Prevent flickering/blinking */
+  .product-card,
+  [class*="grid grid-cols-2"] > div {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    will-change: auto;
+  }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #555;
-}
+  /* ✅ Ensure smooth image loading */
+  img {
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    backface-visibility: hidden;
+  }
 
-/* Remove default styles */
-* {
-  box-sizing: border-box;
-}
+  /* ✅ Force consistent sizes for Tailwind classes */
+  .w-10.h-10 {
+    width: 40px !important;
+    height: 40px !important;
+  }
 
-#root {
-  width: 100%;
-  height: 100vh;
-}
+  .w-12.h-12 {
+    width: 48px !important;
+    height: 48px !important;
+  }
 
-.App {
-  width: 100%;
-  height: 100%;
+  .w-14.h-14 {
+    width: 56px !important;
+    height: 56px !important;
+  }
+
+  .w-32.h-32 {
+    width: 128px !important;
+    height: 128px !important;
+  }
+
+  /* ✅ Consistent rounded corners */
+  .rounded-lg {
+    border-radius: 10px;
+  }
+
+  .rounded-xl {
+    border-radius: 12px;
+  }
+
+  .rounded-2xl {
+    border-radius: 16px;
+  }
+
+  .rounded-3xl {
+    border-radius: 32px;
+  }
+
+  /* ✅ Orange gradient consistency */
+  .bg-gradient-to-br.from-orange-500.to-orange-600,
+  .bg-gradient-to-r.from-orange-500.to-orange-600 {
+    background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+  }
+
+  /* ✅ Welcome screen - centered layout */
+  .welcome-screen {
+    min-height: 60vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ✅ Large input box styling */
+  .welcome-input {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  /* ✅ Suggestion cards */
+  .suggestion-card {
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #555;
+  }
 }

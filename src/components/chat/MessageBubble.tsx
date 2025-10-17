@@ -925,13 +925,12 @@ export default function MessageBubble({ message, customerId }: Props) {
           )}
 
           {/* Product List */}
-{/* Product List */}
 {products && products.length > 0 && (
   <div className="mt-3 grid grid-cols-2 gap-3">
-    {products.map((product) => (
+    {products.map((product, index) => (
       <div 
-        key={`${product.id}-${product.name}`}  // ✅ More stable key
-        className="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md transition-shadow"
+        key={`${product.id}-${product.name}-${index}`}
+        className="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md transition-all duration-200"
       >
         <img 
           src={product.image || 'https://via.placeholder.com/150'} 
@@ -942,8 +941,8 @@ export default function MessageBubble({ message, customerId }: Props) {
             target.src = 'https://via.placeholder.com/150';
           }}
         />
-        <h3 className="font-semibold text-gray-900 mb-1">{product.name}</h3>
-        <p className="text-orange-600 font-bold mb-3">${product.price}</p>
+        <h3 className="font-semibold text-gray-900 mb-1 text-sm">{product.name}</h3>
+        <p className="text-orange-600 font-bold mb-3 text-lg">${product.price}</p>
         <button 
           onClick={() => handleAddToCart(product)}
           className="w-full py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-medium"
