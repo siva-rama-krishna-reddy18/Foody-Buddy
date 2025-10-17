@@ -45,6 +45,11 @@ class AgentService {
         response = await this.handleSearch(customerId, message);
         break;
 
+      case 'DIETARY_SEARCH':
+        const dietaryEntities = await extractEntities(message);
+        response = await this.handleDietarySearch(customerId, message, dietaryEntities);
+        break;
+
       case 'ADD_TO_CART':
         const entities = await extractEntities(message);
         response = await this.handleAddToCart(customerId, message, entities);
@@ -218,7 +223,125 @@ case 'REMOVE_COUPON':
     };
   }
 
-  async handleAddToCart(customerId, message) {
+
+  async handleDietarySearch(customerId, message, entities) {
+    const dietaryType = entities.dietaryType;
+    
+    console.log('[Agent] 🥗 Dietary search:', dietaryType, 'from message:', message);
+    
+    if (!dietaryType) {
+      // Fallback if dietary type couldn't be extracted
+      return {
+        aiText: "I can show you vegetarian or non-vegetarian items. Which would you prefer?",
+        intent: 'DIETARY_SEARCH',
+        productList: [],
+        addToCart: null,
+        cartData: null,
+        meta: { 
+          suggestions: ['Show veg items', 'Show non-veg items', 'View full menu'], 
+          timestamp: new Date().toISOString() 
+        }
+      };
+    }
+
+    try {
+      // ✅ Use your existing vector search with enhanced dietary query
+      let searchQuery = '';
+      
+      if (dietaryType === 'vegetarian') {
+        // Search for vegetarian items
+        searchQuery = 'vegetarian food veg items soup rice vegetables paneer cheese salad noodles pasta';
+        console.log('[Agent] 🥗 Searching for vegetarian items');
+      } else if (dietaryType === 'non-vegetarian') {
+        // Search for non-vegetarian items
+        searchQuery = 'non-vegetarian chicken meat fish seafood beef pork lamb halal fry biryani';
+        console.log('[Agent] 🍗 Searching for non-vegetarian items');
+      } else if (dietaryType === 'vegan') {
+        // Search for vegan items
+        searchQuery = 'vegan plant-based vegetables fruits salad soup rice noodles no dairy no eggs';
+        console.log('[Agent] 🌱 Searching for vegan items');
+      }
+
+      // ✅ Use your existing searchSimilar function with dietary keywords
+      const products = await searchSimilar(searchQuery, 20);
+      
+      console.log(`[Agent] Vector search found ${products.length} potential ${dietaryType} items`);
+      
+      if (products.length === 0) {
+        return {
+          aiText: `Sorry, we don't have any ${dietaryType} items available right now. 😔`,
+          intent: 'DIETARY_SEARCH',
+          productList: [],
+          addToCart: null,
+          cartData: null,
+          meta: { 
+            suggestions: ['View full menu', 'Try other options'], 
+            timestamp: new Date().toISOString() 
+          }
+        };
+      }
+
+      // ✅ OPTIONAL: Post-filter to improve accuracy
+      // This uses name-based filtering as a backup check
+      let filteredProducts = products;
+      
+      if (dietaryType === 'vegetarian') {
+        // Filter out items that are clearly non-veg
+        filteredProducts = products.filter(p => {
+          const name = p.name.toLowerCase();
+          const isNonVeg = /\b(chicken|meat|fish|beef|pork|lamb|seafood|shrimp|prawn|mutton)\b/i.test(name);
+          return !isNonVeg;
+        });
+        console.log(`[Agent] Filtered to ${filteredProducts.length} vegetarian items (removed obvious non-veg)`);
+      } else if (dietaryType === 'non-vegetarian') {
+        // Prioritize items with meat keywords
+        filteredProducts = products.filter(p => {
+          const name = p.name.toLowerCase();
+          const description = (p.description || '').toLowerCase();
+          const hasNonVeg = /\b(chicken|meat|fish|beef|pork|lamb|seafood|shrimp|prawn|mutton|halal|fry)\b/i.test(name + ' ' + description);
+          return hasNonVeg;
+        });
+        console.log(`[Agent] Filtered to ${filteredProducts.length} non-vegetarian items`);
+        
+        // If filtering removed everything, fall back to original results
+        if (filteredProducts.length === 0) {
+          console.log('[Agent] No items passed filter, using original results');
+          filteredProducts = products;
+        }
+      }
+
+      // Use filtered results or fall back to original if empty
+      const finalProducts = filteredProducts.length > 0 ? filteredProducts : products;
+
+      // ✅ FIXED: Return empty aiText to hide the text above products
+      return {
+        aiText: '', // ✅ Empty string = no text displayed
+        intent: 'DIETARY_SEARCH',
+        productList: finalProducts.slice(0, 15), // Limit to top 15 results
+        addToCart: null,
+        cartData: null,
+        meta: { 
+          suggestions: ['Add to cart', 'View full menu', 'Show my cart'], 
+          timestamp: new Date().toISOString() 
+        }
+      };
+
+    } catch (error) {
+      console.error('[Agent] Dietary search error:', error);
+      return {
+        aiText: "Sorry, I couldn't search for dietary options. Please try again.",
+        intent: 'DIETARY_SEARCH',
+        productList: [],
+        addToCart: null,
+        cartData: null,
+        meta: { 
+          suggestions: ['View Menu', 'Try again'], 
+          timestamp: new Date().toISOString() 
+        }
+      };
+    }
+  }
+    async handleAddToCart(customerId, message) {
     const products = await searchSimilar(message, 1);
     if (products.length === 0) {
       return {

@@ -88,6 +88,31 @@ async function classifyIntent(message) {
       return 'GREETING';
     }
     
+    // ✅ NEW: DIETARY SEARCH - Check this BEFORE generic search
+    // Pattern 1: "i want veg/non-veg/vegan"
+    if (/\b(i want|show me|looking for|give me|get me)\b.*(veg|vegetarian|non-veg|non veg|nonveg|vegan|meat|chicken|fish|seafood|halal)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched DIETARY_SEARCH (want pattern)');
+      return 'DIETARY_SEARCH';
+    }
+    
+    // Pattern 2: "veg items", "vegetarian food", "non-veg dishes"
+    if (/\b(veg|vegetarian|non-veg|non veg|nonveg|vegan|halal)\b.*(items|dishes|food|options|menu|meals)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched DIETARY_SEARCH (items pattern)');
+      return 'DIETARY_SEARCH';
+    }
+    
+    // Pattern 3: "only veg/vegetarian"
+    if (/\b(only|just)\b.*(veg|vegetarian|non-veg|vegan)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched DIETARY_SEARCH (only pattern)');
+      return 'DIETARY_SEARCH';
+    }
+    
+    // Pattern 4: "do you have veg/non-veg"
+    if (/\b(do you have|any|got any)\b.*(veg|vegetarian|non-veg|vegan|halal)\b/i.test(lowerMessage)) {
+      console.log('[Intent] ✅ Matched DIETARY_SEARCH (query pattern)');
+      return 'DIETARY_SEARCH';
+    }
+    
     // ✅ Track Orders - EXACT MATCHES FIRST
     if (lowerMessage === 'track orders' || 
         lowerMessage === 'my orders' ||
@@ -188,6 +213,32 @@ async function classifyIntent(message) {
   }
 }
 
+// ✅ NEW: Extract dietary preference from message
+function extractDietaryType(message) {
+  const lowerMessage = message.toLowerCase();
+  
+  // Vegetarian
+  if (/\b(veg(?!an)|vegetarian)\b/i.test(lowerMessage) && 
+      !/\b(non-veg|non veg|nonveg)\b/i.test(lowerMessage)) {
+    console.log('[Intent] 🥗 Dietary type: VEGETARIAN');
+    return 'vegetarian';
+  }
+  
+  // Non-vegetarian
+  if (/\b(non-veg|non veg|nonveg|meat|chicken|fish|seafood|halal)\b/i.test(lowerMessage)) {
+    console.log('[Intent] 🍗 Dietary type: NON-VEGETARIAN');
+    return 'non-vegetarian';
+  }
+  
+  // Vegan
+  if (/\b(vegan|plant-based)\b/i.test(lowerMessage)) {
+    console.log('[Intent] 🌱 Dietary type: VEGAN');
+    return 'vegan';
+  }
+  
+  return null;
+}
+
 function extractEntities(message) {
   const entities = {};
   
@@ -203,23 +254,25 @@ function extractEntities(message) {
     entities.productId = productIdMatch[1];
   }
   
-  // ✅ Extract coupon code - FIXED to handle "apply coupon SAVE10"
+  // ✅ Extract coupon code
   if (message.toLowerCase().includes('coupon')) {
-    // Get the last word in the message
     const words = message.trim().split(/\s+/);
     const lastWord = words[words.length - 1];
     
-    // Check if it's a valid coupon code format (uppercase letters/numbers)
     if (/^[A-Z0-9]{4,}$/i.test(lastWord)) {
       entities.couponCode = lastWord.toUpperCase();
       console.log('[Entities] 💳 Extracted coupon code:', entities.couponCode);
     }
   }
   
+  // ✅ NEW: Extract dietary type
+  entities.dietaryType = extractDietaryType(message);
+  
   return entities;
 }
 
 module.exports = {
   classifyIntent,
-  extractEntities
+  extractEntities,
+  extractDietaryType
 };
