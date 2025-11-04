@@ -2,7 +2,7 @@
 // Complete enhanced socket service with enhanced chatbot features
 
 const { Server } = require('socket.io');
-const agentService = require('./agentService'); // Import instance directly
+const agentService = require('./agentService'); 
 const ChatSession = require('../../models/ChatSession');
 const Message = require('../../models/Message');
 const { v4: uuidv4 } = require('uuid');

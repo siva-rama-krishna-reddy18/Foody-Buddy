@@ -29,10 +29,10 @@ async function searchSimilar(query, k = 5, ownerType = 'product') {
       return await enhancedTextSearch(query, k, ownerType);
     }
     
-    // Rest of your existing vector search code...
+    
     if (DEBUG) console.log('[VECTOR] Embedding generated, attempting vector search');
     
-    // Try MongoDB vector search
+    
     try {
       const vectorResults = await performMongoDBVectorSearch(queryEmbedding, query, k, ownerType);
       if (vectorResults && vectorResults.length > 0) {
@@ -98,7 +98,7 @@ async function calculateSimilaritiesFromProducts(products, queryEmbedding, query
     'chicken': ['chicken'],
     'rice': ['rice'],
     'biryani': ['biryani'],
-    // ✅ ADD: Exact product name matching
+    
     'fried rice': ['fried rice'], // Must match exactly, not "chicken fried rice"
   };
   
@@ -156,14 +156,14 @@ async function calculateSimilaritiesFromProducts(products, queryEmbedding, query
     if (shouldFilterStrictly) {
       const productText = product.name.toLowerCase();
       
-      // ✅ FIX: For exact match, exclude products with extra words
+      
       if (isExactMatch) {
-        // If looking for "fried rice", exclude "chicken fried rice"
+        
         if (productText === 'fried rice') {
           boostedSimilarity += 0.5;
           if (DEBUG) console.log(`[VECTOR] EXACT MATCH CONFIRMED: "${product.name}"`);
         } else if (productText.includes('fried rice')) {
-          // Contains "fried rice" but has other words - filter out
+          
           if (DEBUG) console.log(`[VECTOR] FILTERED OUT: "${product.name}" - contains extra words`);
           continue;
         } else {
@@ -264,9 +264,9 @@ async function enhancedTextSearch(query, k = 5, ownerType = 'product') {
         
         if (DEBUG) console.log(`[VECTOR] Found ${menuItems.length} total menu items`);
         
-        // ✅ FIX: Convert _id to id string
+        
         return menuItems.map(p => ({
-          id: p._id.toString(), // ✅ Always convert _id to string
+          id: p._id.toString(), 
           name: p.name,
           price: parseFloat(p.price || 0),
           description: p.description || '',
@@ -292,9 +292,9 @@ async function enhancedTextSearch(query, k = 5, ownerType = 'product') {
       
       if (DEBUG) console.log(`[VECTOR] Text search found ${products.length} products`);
       
-      // ✅ FIX: Convert _id to id string
+      
       return products.map(p => ({
-        id: p._id.toString(), // ✅ Always convert _id to string
+        id: p._id.toString(), 
         name: p.name,
         price: parseFloat(p.price || 0),
         description: p.description || '',

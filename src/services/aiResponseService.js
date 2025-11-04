@@ -2,7 +2,7 @@
 const axios = require('axios');
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'phi';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'tinyllama';
 
 const SYSTEM_PROMPT = `You are FoodyBuddy, a friendly and helpful AI food ordering assistant. Your role is to help customers discover, order, and track their food orders.
 
@@ -78,7 +78,7 @@ async function generateAIResponse(intent, context, userMessage) {
     
     // Check if Ollama is running
     if (error.code === 'ECONNREFUSED') {
-      console.error('[AI] ❌ Ollama is not running! Start it with: ollama serve');
+      console.error('[AI]  Ollama is not running! Start it with: ollama serve');
     }
     
     return getFallbackResponse(intent, context);
@@ -210,23 +210,23 @@ function getFallbackResponse(intent, context) {
   const fallbacks = {
     GREETING: "Hello! 👋 Welcome to FoodyBuddy. I'm here to help you order delicious food. What would you like today?",
     ADD_TO_CART: context.product 
-      ? `Great choice! Added ${context.product.name} ($${context.product.price}) to your cart! 🛒`
-      : "I couldn't find that item. Try browsing our menu! 🔍",
+      ? `Great choice! Added ${context.product.name} ($${context.product.price}) to your cart! `
+      : "I couldn't find that item. Try browsing our menu! ",
     VIEW_CART: context.cart && context.cart.items?.length > 0
       ? `Your cart: ${context.cart.itemCount} item(s), $${context.cart.total}. Ready to checkout?`
-      : "Your cart is empty! Browse our menu to add items. 🛒",
-    CHECKOUT: `Ready to checkout! Total: $${context.total}. 💳`,
-    PAYMENT_SUCCESS: `🎉 Order #${context.orderNumber} placed! Total: $${context.total}`,
-    ORDER_STATUS: `You have ${context.orderCount} order(s). 📦`,
+      : "Your cart is empty! Browse our menu to add items. ",
+    CHECKOUT: `Ready to checkout! Total: $${context.total}. `,
+    PAYMENT_SUCCESS: ` Order #${context.orderNumber} placed! Total: $${context.total}`,
+    ORDER_STATUS: `You have ${context.orderCount} order(s). `,
     TRACK_ORDER: context.order 
       ? `Order #${context.order.orderNumber} - ${context.order.status}`
       : "Order not found. Check the order number.",
-    RECOMMEND: "Here's our menu! Add items to your cart. 🍽️",
+    RECOMMEND: "Here's our menu! Add items to your cart. ",
     SEARCH: context.productCount > 0
-      ? `Found ${context.productCount} items! 🔍`
+      ? `Found ${context.productCount} items! `
       : "No items found. Try different keywords.",
     REMOVE_FROM_CART: "Item removed from cart.",
-    CLEAR_CART: "Cart cleared! 🗑️",
+    CLEAR_CART: "Cart cleared! ",
     REORDER: context.success ? `Items from order #${context.orderNumber} added to cart!` : "Could not reorder.",
     UNKNOWN: "I didn't understand. Try: 'Show menu' or 'Track orders'"
   };
@@ -238,10 +238,10 @@ function getFallbackResponse(intent, context) {
 async function testOllamaConnection() {
   try {
     const response = await axios.get(`${OLLAMA_BASE_URL}/api/tags`, { timeout: 3000 });
-    console.log('[AI] ✅ Ollama connected. Available models:', response.data.models.map(m => m.name).join(', '));
+    console.log('[AI]  Ollama connected. Available models:', response.data.models.map(m => m.name).join(', '));
     return true;
   } catch (error) {
-    console.error('[AI] ❌ Ollama not available:', error.message);
+    console.error('[AI]  Ollama not available:', error.message);
     console.error('[AI] Make sure Ollama is running: ollama serve');
     return false;
   }

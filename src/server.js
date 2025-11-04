@@ -31,11 +31,11 @@ mongoose.connect(process.env.MONGODB_URI, {
   useUnifiedTopology: true
 })
 .then(() => {
-  console.log('✅ MongoDB Connected:', mongoose.connection.host);
-  console.log('📊 Database:', mongoose.connection.name);
+  console.log(' MongoDB Connected:', mongoose.connection.host);
+  console.log(' Database:', mongoose.connection.name);
 })
 .catch(err => {
-  console.error('❌ MongoDB connection error:', err);
+  console.error(' MongoDB connection error:', err);
   process.exit(1);
 });
 
@@ -58,9 +58,9 @@ setupSocketHandlers(io);
 // Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`\n🚀 Server running on port ${PORT}`);
-  console.log(`📡 Socket.IO enabled`);
-  console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
+  console.log(`\n Server running on port ${PORT}`);
+  console.log(` Socket.IO enabled`);
+  console.log(` Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
 });
 
 // Graceful shutdown

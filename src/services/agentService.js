@@ -11,6 +11,9 @@ const CustomerPreferences = require('../../models/CustomerPreferences');
 const Coupon = require('../../models/Coupon');
 const { v4: uuidv4 } = require('uuid');
 const mongoose = require('mongoose');
+const nodemailer = require('nodemailer');
+
+const LangChainAgent = require('./langchainService');
 const pendingPayments = new Map();
 
 const DEBUG = process.env.DEBUG_ORCHESTRATOR === 'true';
@@ -20,10 +23,131 @@ class AgentService {
   constructor() {
     // Test Ollama on startup
     testOllamaConnection();
+
+    this.langchainAgent = new LangChainAgent(this, searchSimilar);
+    this.USE_LANGCHAIN = process.env.USE_LANGCHAIN === 'true';
+    
+    // ✅ Initialize LangChain on startup
+    if (this.USE_LANGCHAIN) {
+      this.langchainAgent.initialize().catch(err => {
+        console.error('[Agent] LangChain initialization failed:', err);
+      });
+    }
   }
+    //  Store payment data in memory
+  async storePaymentData(customerId, data) {
+    if (!customerId || !data) return;
+    pendingPayments.set(customerId, { paymentData: data, timestamp: Date.now() });
+    console.log(`[AgentService]  Stored payment data for customer: ${customerId}`);
+  }
+
+  //  Retrieve stored payment data
+  async getPaymentData(customerId) {
+    const data = pendingPayments.get(customerId);
+    if (!data) {
+      console.warn(`[AgentService]  No stored payment data found for customer: ${customerId}`);
+      return null;
+    }
+    console.log(`[AgentService]  Retrieved stored payment data for customer: ${customerId}`);
+    return data.paymentData;
+  }
+
+  
+  async clearPaymentData(customerId) {
+    pendingPayments.delete(customerId);
+    console.log(`[AgentService]  Cleared payment data for customer: ${customerId}`);
+  }
+
+
+ 
+  async processWithLangChain(customerId, message) {
+    try {
+      console.log('[Agent]  Using LangChain for:', message);
+      
+      const langchainResponse = await this.langchainAgent.chat(customerId, message);
+      
+      console.log('[Agent] LangChain response:', langchainResponse.text);
+      console.log('[Agent] Tools used:', langchainResponse.toolsUsed);
+      
+      
+      let response = {
+        aiText: langchainResponse.text,
+        intent: 'LANGCHAIN',
+        productList: [],
+        addToCart: null,
+        cartData: null,
+        orderData: null,
+        meta: {
+          suggestions: ['View Menu', 'Show my cart', 'Track orders'],
+          timestamp: new Date().toISOString(),
+          langchain: true,
+          toolsUsed: langchainResponse.toolsUsed
+        }
+      };
+
+      // ✅ Extract products from menu_search tool
+      const menuResult = langchainResponse.toolResults.find(r => r.items);
+    if (menuResult && menuResult.items) {
+      response.productList = menuResult.items;
+      response.intent = 'RECOMMEND';
+      response.aiText = ''; //  REMOVE AI text when showing products
+      response.meta.suggestions = ['Add to cart', 'View cart', 'Show more items'];
+    }
+
+      // ✅ Extract cart from cart_operations tool
+    const cartResult = langchainResponse.toolResults.find(r => r.cart || r.action === 'view');
+    if (cartResult && cartResult.cart) {
+      const cart = cartResult.cart;
+      response.cartData = {
+        text: '',
+        type: 'cart_display',
+        cartItems: cart.items || [],
+        cartTotal: cart.total || 0
+      };
+      response.intent = 'VIEW_CART';
+      response.aiText = ''; // ✅ REMOVE AI text when showing cart
+    }
+
+      // ✅ Extract orders from order_operations tool
+    const orderResult = langchainResponse.toolResults.find(r => r.orders);
+    if (orderResult && orderResult.orders) {
+      response.orderData = {
+        type: 'order_tracking',
+        orders: orderResult.orders
+      };
+      response.intent = 'ORDER_STATUS';
+      response.aiText = ''; // ✅ REMOVE AI text when showing orders
+    }
+
+      return response;
+
+    } catch (error) {
+      console.error('[Agent] LangChain processing error:', error);
+      // Fall back to regular processing
+      return null;
+    }
+  }
+
   async processMessage(customerId, message, sessionId = null) {
   try {
     console.log('[Agent] Processing:', `"${message}"`, 'for customer:', customerId);
+
+    //  HANDLE PAYMENT SUCCESS FIRST
+if (message.toUpperCase().includes('PAYMENT SUCCESS')) {
+  console.log('[Agent]  Detected PAYMENT SUCCESS — creating order manually');
+  return await this.handlePaymentSuccess(customerId, message);
+}
+
+
+if (this.USE_LANGCHAIN && !message.startsWith('{')) {
+  const langchainResponse = await this.processWithLangChain(customerId, message);
+  if (langchainResponse) {
+    console.log('[Agent]  Using LangChain response');
+    return langchainResponse;
+  }
+  console.log('[Agent]  LangChain failed, falling back to intent system');
+}
+
 
     // Classify intent
     const intent = await classifyIntent(message);
@@ -82,7 +206,7 @@ case 'REMOVE_COUPON':
   break;
 
       case 'CHECKOUT':
-        response = await this.handleCheckout(customerId, message); // ✅ Pass message here
+        response = await this.handleCheckout(customerId, message); 
         break;
 
       case 'PAYMENT_SUCCESS':
@@ -163,7 +287,7 @@ case 'REMOVE_COUPON':
    async handleGreeting(customerId, message = '') {
     console.log('[Agent] Handling greeting, generating AI response...');
   const aiText = await generateAIResponse('GREETING', {}, message);
-  console.log('[Agent] ✅ AI greeting generated:', aiText);
+  console.log('[Agent]  AI greeting generated:', aiText);
     return {
       aiText,
       intent: 'GREETING',
@@ -227,7 +351,7 @@ case 'REMOVE_COUPON':
   async handleDietarySearch(customerId, message, entities) {
     const dietaryType = entities.dietaryType;
     
-    console.log('[Agent] 🥗 Dietary search:', dietaryType, 'from message:', message);
+    console.log('[Agent]  Dietary search:', dietaryType, 'from message:', message);
     
     if (!dietaryType) {
       // Fallback if dietary type couldn't be extracted
@@ -245,24 +369,24 @@ case 'REMOVE_COUPON':
     }
 
     try {
-      // ✅ Use your existing vector search with enhanced dietary query
+      
       let searchQuery = '';
       
       if (dietaryType === 'vegetarian') {
         // Search for vegetarian items
         searchQuery = 'vegetarian food veg items soup rice vegetables paneer cheese salad noodles pasta';
-        console.log('[Agent] 🥗 Searching for vegetarian items');
+        console.log('[Agent]  Searching for vegetarian items');
       } else if (dietaryType === 'non-vegetarian') {
         // Search for non-vegetarian items
         searchQuery = 'non-vegetarian chicken meat fish seafood beef pork lamb halal fry biryani';
-        console.log('[Agent] 🍗 Searching for non-vegetarian items');
+        console.log('[Agent]  Searching for non-vegetarian items');
       } else if (dietaryType === 'vegan') {
         // Search for vegan items
         searchQuery = 'vegan plant-based vegetables fruits salad soup rice noodles no dairy no eggs';
-        console.log('[Agent] 🌱 Searching for vegan items');
+        console.log('[Agent]  Searching for vegan items');
       }
 
-      // ✅ Use your existing searchSimilar function with dietary keywords
+      
       const products = await searchSimilar(searchQuery, 20);
       
       console.log(`[Agent] Vector search found ${products.length} potential ${dietaryType} items`);
@@ -313,7 +437,7 @@ case 'REMOVE_COUPON':
       // Use filtered results or fall back to original if empty
       const finalProducts = filteredProducts.length > 0 ? filteredProducts : products;
 
-      // ✅ FIXED: Return empty aiText to hide the text above products
+      
       return {
         aiText: '', // ✅ Empty string = no text displayed
         intent: 'DIETARY_SEARCH',
@@ -359,7 +483,7 @@ case 'REMOVE_COUPON':
       await this.addItemToCart(customerId, product.id, 1);
       const cart = await this.getCart(customerId);
       return {
-        aiText: `✅ Added ${product.name} to your cart! ($${product.price})`,
+        aiText: ` Added ${product.name} to your cart! ($${product.price})`,
         intent: 'ADD_TO_CART',
         productList: [],
         addToCart: { product, quantity: 1 },
@@ -501,38 +625,168 @@ case 'REMOVE_COUPON':
     };
   }
 
-  async handleCheckout(customerId, message) {
-    console.log('[Agent] 🛒 CHECKOUT - Raw message received:', message);
-    console.log('[Agent] 🛒 Message type:', typeof message);
-    
-    if (!message) {
-      console.error('[Agent] ❌ No message provided to handleCheckout');
-      return {
-        aiText: "Error processing checkout. Please try again.",
-        intent: 'CHECKOUT',
-        productList: [],
-        addToCart: null,
-        cartData: null,
-        payment: null,
-        meta: {
-          suggestions: ['Show my cart', 'View Menu'],
-          timestamp: new Date().toISOString()
-        }
-      };
+ async handleCheckout(customerId, message) {
+  console.log('[Agent]  CHECKOUT - Raw message received:', message);
+  console.log('[Agent]  Message type:', typeof message);
+  
+  if (!message) {
+    console.error('[Agent]  No message provided to handleCheckout');
+    return {
+      aiText: "Error processing checkout. Please try again.",
+      intent: 'CHECKOUT',
+      productList: [],
+      addToCart: null,
+      cartData: null,
+      payment: null,
+      meta: { suggestions: ['Show my cart', 'View Menu'], timestamp: new Date().toISOString() }
+    };
+  }
+  
+  console.log('[Agent]  Message length:', message.length);
+  
+  const cart = await this.getCart(customerId);
+
+  if (!cart.items || cart.items.length === 0) {
+    return {
+      aiText: "Your cart is empty! Add some items first. ",
+      intent: 'CHECKOUT',
+      productList: [],
+      addToCart: null,
+      cartData: null,
+      payment: null,
+      meta: { suggestions: ['View Menu'], timestamp: new Date().toISOString() }
+    };
+  }
+
+  // ✅ TAX CONFIGURATION
+  const TAX_RATE = 0.08; // 8% tax
+
+  
+  let subtotal = parseFloat(cart.total);
+  let discount = 0;
+  let appliedCoupon = null;
+  let specialInstructions = {};
+  let checkoutData = null;
+
+  // Parse JSON checkout data
+  const trimmedMessage = message.trim();
+  console.log('[Agent]  Trimmed message:', trimmedMessage);
+  
+  if (trimmedMessage.startsWith('{') && trimmedMessage.endsWith('}')) {
+    try {
+      checkoutData = JSON.parse(trimmedMessage);
+      console.log('[Agent]  Successfully parsed JSON checkout data:', JSON.stringify(checkoutData, null, 2));
+    } catch (error) {
+      console.error('[Agent]  JSON parse error:', error.message);
+    }
+  }
+
+  //  Get coupon from LangChain if applied
+  if (this.USE_LANGCHAIN && this.langchainAgent) {
+    appliedCoupon = this.langchainAgent.getAppliedCoupon(customerId);
+    console.log('[Agent]  Retrieved stored coupon:', appliedCoupon);
+  }
+
+  // If no coupon from LangChain, check checkoutData
+  if (!appliedCoupon && checkoutData?.coupon) {
+    appliedCoupon = checkoutData.coupon;
+  }
+
+  //  CALCULATE DISCOUNT
+  if (appliedCoupon) {
+    if (appliedCoupon.type === 'percentage') {
+      discount = subtotal * (appliedCoupon.discount / 100);
+    } else {
+      discount = appliedCoupon.discount;
     }
     
-    console.log('[Agent] 🛒 Message length:', message.length);
+    console.log('[Agent]  Coupon applied:', {
+      code: appliedCoupon.code,
+      subtotal: '$' + subtotal.toFixed(2),
+      discountAmount: '$' + discount.toFixed(2)
+    });
+  }
+
+  // ✅ CALCULATE TAX (on subtotal AFTER discount)
+  const subtotalAfterDiscount = subtotal - discount;
+  const tax = subtotalAfterDiscount * TAX_RATE;
+  const total = subtotalAfterDiscount + tax;
+
+  console.log('[Agent]  Checkout calculation:', {
+    subtotal: '$' + subtotal.toFixed(2),
+    discount: '$' + discount.toFixed(2),
+    subtotalAfterDiscount: '$' + subtotalAfterDiscount.toFixed(2),
+    tax: '$' + tax.toFixed(2),
+    total: '$' + total.toFixed(2)
+  });
+
+  if (checkoutData?.specialInstructions) {
+    specialInstructions = checkoutData.specialInstructions;
+    console.log('[Agent] 📝 Special instructions:', specialInstructions);
+  }
+
+  const paymentData = {
+    total: parseFloat(total.toFixed(2)),
+    subtotal: parseFloat(subtotal.toFixed(2)),
+    tax: parseFloat(tax.toFixed(2)),
+    taxRate: TAX_RATE,
+    discount: parseFloat(discount.toFixed(2)),
+    coupon: appliedCoupon,
+    specialInstructions: specialInstructions,
+    items: cart.items.map(item => ({
+      name: item.name,
+      quantity: item.quantity,
+      price: item.price
+    }))
+  };
+
+  // ✅ Store payment data for when payment completes
+  await this.storePaymentData(customerId, paymentData);
+  console.log('[Agent]  Stored payment data for customer:', customerId);
+
+  console.log('[Agent]  Final payment data being sent:', JSON.stringify(paymentData, null, 2));
+
+  return {
+    aiText: '',
+    intent: 'CHECKOUT',
+    productList: [],
+    addToCart: null,
+    cartData: null,
+    payment: paymentData,
+    meta: {
+      suggestions: [],
+      timestamp: new Date().toISOString()
+    }
+  };
+}
+
+  async handlePaymentSuccess(customerId, message) {
+  try {
+    console.log('\n==================== PAYMENT SUCCESS START ====================');
+    console.log('[Agent] Processing payment success for customer:', customerId);
+    
+    // ✅ Get stored payment data
+    const storedPayment = pendingPayments.get(customerId);
+    console.log('[Agent]  Retrieved stored payment data:', storedPayment ? 'Found' : 'Not found');
     
     const cart = await this.getCart(customerId);
-
+    
+    console.log('[Agent] Cart contents:', {
+      itemCount: cart.itemCount,
+      total: cart.total,
+      items: cart.items?.length || 0
+    });
+    
     if (!cart.items || cart.items.length === 0) {
+      pendingPayments.delete(customerId);
+      console.log('[Agent]  No items in cart');
       return {
-        aiText: "Your cart is empty! Add some items first. 🛒",
-        intent: 'CHECKOUT',
+        aiText: "No items in cart to complete order.",
+        intent: 'PAYMENT_SUCCESS',
         productList: [],
         addToCart: null,
         cartData: null,
-        payment: null,
+        orderData: null,
         meta: {
           suggestions: ['View Menu'],
           timestamp: new Date().toISOString()
@@ -540,260 +794,310 @@ case 'REMOVE_COUPON':
       };
     }
 
-    // Parse JSON checkout data
-    let checkoutData = null;
-    const trimmedMessage = message.trim();
-    
-    console.log('[Agent] 🔍 Trimmed message:', trimmedMessage);
-    
-    if (trimmedMessage.startsWith('{') && trimmedMessage.endsWith('}')) {
-      try {
-        checkoutData = JSON.parse(trimmedMessage);
-        console.log('[Agent] ✅ Successfully parsed JSON checkout data:', JSON.stringify(checkoutData, null, 2));
-      } catch (error) {
-        console.error('[Agent] ❌ JSON parse error:', error.message);
-      }
+    // ✅ Clear coupon from LangChain
+    if (this.USE_LANGCHAIN && this.langchainAgent) {
+      this.langchainAgent.clearCoupon(customerId);
     }
 
-    // Calculate total with coupon
-    let subtotal = parseFloat(cart.total);
+    // ✅ Calculate final amounts using stored payment data
+    let finalAmount = parseFloat(cart.total);
     let discount = 0;
-    let total = subtotal;
+    let tax = 0;
+    let subtotal = parseFloat(cart.total);
     let appliedCoupon = null;
     let specialInstructions = {};
 
-    if (checkoutData?.coupon) {
-      appliedCoupon = checkoutData.coupon;
-      discount = subtotal * (appliedCoupon.discount / 100);
-      total = subtotal - discount;
+    if (storedPayment?.paymentData) {
+      const paymentData = storedPayment.paymentData;
+      finalAmount = paymentData.total;
+      subtotal = paymentData.subtotal;
+      tax = paymentData.tax || 0;
+      discount = paymentData.discount;
+      appliedCoupon = paymentData.coupon;
+      specialInstructions = paymentData.specialInstructions || {};
       
-      console.log('[Agent] 💰 Coupon applied:', {
-        code: appliedCoupon.code,
-        discountPercent: appliedCoupon.discount + '%',
+      console.log('[Agent] 💰 Using stored payment data:', {
         subtotal: '$' + subtotal.toFixed(2),
-        discountAmount: '$' + discount.toFixed(2),
-        finalTotal: '$' + total.toFixed(2)
+        tax: '$' + tax.toFixed(2),
+        discount: '$' + discount.toFixed(2),
+        finalAmount: '$' + finalAmount.toFixed(2),
+        coupon: appliedCoupon?.code || 'None'
       });
     }
 
-    if (checkoutData?.specialInstructions) {
-      specialInstructions = checkoutData.specialInstructions;
-      console.log('[Agent] 📝 Special instructions:', specialInstructions);
-    }
+    // Generate unique order number
+    const orderNumber = Math.floor(10000 + Math.random() * 90000);
+    const orderDate = new Date();
 
-    const paymentData = {
-      total: parseFloat(total.toFixed(2)),
-      subtotal: parseFloat(subtotal.toFixed(2)),
-      discount: parseFloat(discount.toFixed(2)),
-      coupon: appliedCoupon,
-      specialInstructions: specialInstructions,
-      items: cart.items.map(item => ({
-        name: item.name,
-        quantity: item.quantity,
-        price: item.price
-      }))
+    console.log('[Agent] Creating order #', orderNumber);
+
+    // Format order items with special instructions
+    const orderItems = cart.items.map(item => ({
+      product: item.name,
+      title: item.name,
+      price: item.price.toString(),
+      quantity: item.quantity,
+      total: (item.price * item.quantity).toString(),
+      specialInstructions: specialInstructions[item.productId] || ''
+    }));
+
+    console.log('[Agent] Order items:', orderItems.length);
+
+    // Create order in database
+    const order = await Order.create({
+      order_number: orderNumber,
+      amount: finalAmount.toFixed(2),
+      amount_paid: finalAmount.toFixed(2),
+      original_amount: subtotal.toFixed(2),
+      discount_amount: discount.toFixed(2),
+      coupon_code: appliedCoupon?.code || null,
+      created_at: orderDate.toISOString(),
+      date: orderDate.toISOString(),
+      currency: 'USD',
+      group_id: customerId,
+      customer_id: customerId,
+      line_items: orderItems,
+      payment_method: 'CARD',
+      status: 'CONFIRMED',
+      orderNumberProvisional: orderNumber
+    });
+
+    console.log('[Agent]  Order created in database:', {
+      _id: order._id,
+      orderNumber: order.order_number,
+      amount: order.amount,
+      original_amount: order.original_amount,
+      discount_amount: order.discount_amount,
+      coupon_code: order.coupon_code,
+      items: order.line_items.length
+    });
+
+ // ✅ SEND EMAIL - Replace the try-catch block
+try {
+  console.log('[Agent]  Attempting to send order confirmation email...');
+  
+  // ✅ Check if email credentials are configured
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.log('[Agent]  Email credentials not configured, skipping email');
+  } else {
+    // Configure email transporter
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
+
+    // Email template
+    const emailContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background-color: #ff6b35; color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0; }
+          .content { background-color: #f9f9f9; padding: 20px; }
+          .order-item { padding: 12px; border-bottom: 1px solid #ddd; background: white; margin: 5px 0; border-radius: 5px; }
+          .note { background-color: #e3f2fd; color: #0066cc; padding: 5px 10px; border-radius: 3px; font-size: 12px; margin-top: 5px; }
+          .totals { margin-top: 20px; padding: 15px; background: white; border-radius: 5px; }
+          .total-row { display: flex; justify-content: space-between; margin: 8px 0; }
+          .total { font-size: 20px; font-weight: bold; color: #ff6b35; border-top: 2px solid #ff6b35; padding-top: 10px; }
+          .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; background: #f0f0f0; border-radius: 0 0 10px 10px; }
+          .status-badge { display: inline-block; background: #4caf50; color: white; padding: 5px 15px; border-radius: 20px; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🍔 Order Confirmation</h1>
+            <p style="margin: 5px 0; font-size: 18px;">Order #${orderNumber}</p>
+            <span class="status-badge">✓ Confirmed</span>
+          </div>
+          <div class="content">
+            <p style="font-size: 16px;"><strong>Thank you for your order!</strong></p>
+            <p><strong>Order Date:</strong> ${orderDate.toLocaleString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            })}</p>
+            
+            <h3 style="color: #ff6b35; border-bottom: 2px solid #ff6b35; padding-bottom: 5px;">Order Items:</h3>
+            ${orderItems.map(item => `
+              <div class="order-item">
+                <div style="display: flex; justify-content: space-between;">
+                  <strong>${item.quantity}x ${item.product}</strong>
+                  <strong>$${(parseFloat(item.price) * item.quantity).toFixed(2)}</strong>
+                </div>
+                ${item.specialInstructions ? `<div class="note">📝 ${item.specialInstructions}</div>` : ''}
+              </div>
+            `).join('')}
+            
+            <div class="totals">
+              <div class="total-row">
+                <span>Subtotal:</span>
+                <span>$${subtotal.toFixed(2)}</span>
+              </div>
+              ${tax > 0 ? `
+              <div class="total-row">
+                <span>Tax (8%):</span>
+                <span>$${tax.toFixed(2)}</span>
+              </div>
+              ` : ''}
+              ${discount > 0 ? `
+              <div class="total-row" style="color: #4caf50; font-weight: bold;">
+                <span>Discount${appliedCoupon ? ` (${appliedCoupon.code})` : ''}:</span>
+                <span>-$${discount.toFixed(2)}</span>
+              </div>
+              ` : ''}
+              <div class="total-row total">
+                <span>Total Paid:</span>
+                <span>$${finalAmount.toFixed(2)}</span>
+              </div>
+            </div>
+            
+            <div style="margin-top: 25px; padding: 15px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 5px;">
+              <p style="margin: 0;"><strong>⏰ Estimated Delivery:</strong> 35-45 minutes</p>
+              <p style="margin: 10px 0 0 0; font-size: 14px; color: #666;">We're preparing your order with care!</p>
+            </div>
+            
+            <p style="margin-top: 25px; padding: 15px; background: white; border-radius: 5px; border-left: 4px solid #2196f3;">
+              📱 <strong>Track your order:</strong> Reply to this email or visit our app to get real-time updates on your order status.
+            </p>
+          </div>
+          <div class="footer">
+            <p style="margin: 5px 0; font-size: 16px; font-weight: bold;">🍽️ FoodyBuddy</p>
+            <p style="margin: 5px 0;">Your Personal Food Ordering Assistant</p>
+            <p style="margin: 10px 0 5px 0;">Questions? Reply to this email or contact support</p>
+            <p style="margin: 5px 0; color: #999;">This is an automated message, please do not reply directly</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const mailOptions = {
+      from: `"FoodyBuddy 🍔" <${process.env.EMAIL_USER}>`,
+      to: process.env.EMAIL_USER, // ✅ For testing - sends to yourself
+      subject: `✓ Order Confirmation #${orderNumber} - FoodyBuddy`,
+      html: emailContent,
+      text: `Order Confirmation #${orderNumber}\n\nThank you for your order!\n\nOrder Details:\n${orderItems.map(i => `${i.quantity}x ${i.product} - $${(parseFloat(i.price) * i.quantity).toFixed(2)}`).join('\n')}\n\nTotal: $${finalAmount.toFixed(2)}\n\nEstimated delivery: 35-45 minutes`
     };
 
-    // ✅ Store payment data for when payment completes
-    pendingPayments.set(customerId, {
-      paymentData,
-      timestamp: Date.now()
-    });
-    console.log('[Agent] 💾 Stored payment data for customer:', customerId);
+    const emailResult = await transporter.sendMail(mailOptions);
+    
+    console.log('[Agent]  Email sent successfully!');
+    console.log('[Agent]  Message ID:', emailResult.messageId);
+    console.log('[Agent]  Response:', emailResult.response);
+  }
+  
+} catch (emailError) {
+  console.error('[Agent]  Email sending failed:', emailError.message);
+  console.error('[Agent] Stack:', emailError.stack);
+  // Continue with order creation even if email fails
+}
+    // Clear cart and stored payment data
+    await this.clearCartItems(customerId);
+    pendingPayments.delete(customerId);
+    console.log('[Agent]  Cart cleared and payment data removed');
 
-    console.log('[Agent] 💳 Final payment data being sent:', JSON.stringify(paymentData, null, 2));
+    console.log('==================== PAYMENT SUCCESS END ====================\n');
+
+    // Build success message
+    let successMessage = ` Payment successful! Your order #${orderNumber} has been placed.\n\n Order Details:\n• ${orderItems.length} item${orderItems.length !== 1 ? 's' : ''}\n`;
+    
+    if (discount > 0 && appliedCoupon) {
+      successMessage += `• Original: $${subtotal.toFixed(2)}\n• Discount (${appliedCoupon.code}): -$${discount.toFixed(2)}\n`;
+      if (tax > 0) {
+        successMessage += `• Tax (8%): $${tax.toFixed(2)}\n`;
+      }
+      successMessage += `• Total Paid: $${finalAmount.toFixed(2)} 💚\n`;
+    } else {
+      if (tax > 0) {
+        successMessage += `• Subtotal: $${subtotal.toFixed(2)}\n• Tax (8%): $${tax.toFixed(2)}\n`;
+      }
+      successMessage += `• Total: $${finalAmount.toFixed(2)}\n`;
+    }
+    
+    successMessage += `• Status: Confirmed\n\n📧 Order confirmation sent to your email.\n\nYou'll receive updates as your order is prepared. Thank you! 🍽️`;
 
     return {
-      aiText: '',
-      intent: 'CHECKOUT',
+      aiText: successMessage,
+      intent: 'PAYMENT_SUCCESS',
       productList: [],
       addToCart: null,
       cartData: null,
-      payment: paymentData,
+      orderData: {
+        type: 'order_confirmation',
+        orders: [{
+          id: order._id.toString(),
+          orderNumber: order.order_number.toString(),
+          status: 'preparing',
+          date: orderDate.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          }),
+          total: finalAmount,
+          estimatedDelivery: this.getEstimatedDelivery(order),
+          items: orderItems.map(item => ({
+            name: item.product,
+            quantity: item.quantity,
+            price: parseFloat(item.price)
+          }))
+        }]
+      },
       meta: {
-        suggestions: [],
+        timestamp: new Date().toISOString()
+      }
+    };
+
+  } catch (error) {
+    console.error('\n==================== PAYMENT SUCCESS ERROR ====================');
+    console.error('[Agent] Error:', error);
+    console.error('[Agent] Stack:', error.stack);
+    console.error('================================================================\n');
+    
+    pendingPayments.delete(customerId);
+    
+    return {
+      aiText: "There was an issue processing your order. Please contact support.",
+      intent: 'PAYMENT_SUCCESS',
+      productList: [],
+      addToCart: null,
+      cartData: null,
+      orderData: null,
+      meta: {
+        suggestions: ['Contact support', 'Try again'],
         timestamp: new Date().toISOString()
       }
     };
   }
-
-  async handlePaymentSuccess(customerId, message) {
-    try {
-      console.log('\n==================== PAYMENT SUCCESS START ====================');
-      console.log('[Agent] Processing payment success for customer:', customerId);
-      
-      // ✅ Get stored payment data
-      const storedPayment = pendingPayments.get(customerId);
-      console.log('[Agent] 📦 Retrieved stored payment data:', storedPayment ? 'Found' : 'Not found');
-      
-      const cart = await this.getCart(customerId);
-      
-      console.log('[Agent] Cart contents:', {
-        itemCount: cart.itemCount,
-        total: cart.total,
-        items: cart.items?.length || 0
-      });
-      
-      if (!cart.items || cart.items.length === 0) {
-        pendingPayments.delete(customerId); // Clean up
-        console.log('[Agent] ❌ No items in cart');
-        return {
-          aiText: "No items in cart to complete order.",
-          intent: 'PAYMENT_SUCCESS',
-          productList: [],
-          addToCart: null,
-          cartData: null,
-          orderData: null,
-          meta: {
-            suggestions: ['View Menu'],
-            timestamp: new Date().toISOString()
-          }
-        };
-      }
-
-      // ✅ Calculate final amounts using stored payment data
-      let finalAmount = parseFloat(cart.total);
-      let discount = 0;
-      let appliedCoupon = null;
-      let specialInstructions = {};
-
-      if (storedPayment?.paymentData) {
-        const paymentData = storedPayment.paymentData;
-        finalAmount = paymentData.total;
-        discount = paymentData.discount;
-        appliedCoupon = paymentData.coupon;
-        specialInstructions = paymentData.specialInstructions || {};
-        
-        console.log('[Agent] 💰 Using stored payment data:', {
-          finalAmount: '$' + finalAmount.toFixed(2),
-          discount: '$' + discount.toFixed(2),
-          coupon: appliedCoupon?.code || 'None'
-        });
-      }
-
-      // Generate unique order number
-      const orderNumber = Math.floor(10000 + Math.random() * 90000);
-      const orderDate = new Date();
-
-      console.log('[Agent] Creating order #', orderNumber);
-
-      // Format order items with special instructions
-      const orderItems = cart.items.map(item => ({
-        product: item.name,
-        title: item.name,
-        price: item.price.toString(),
-        quantity: item.quantity,
-        total: (item.price * item.quantity).toString(),
-        specialInstructions: specialInstructions[item.productId] || ''
-      }));
-
-      console.log('[Agent] Order items:', orderItems.length);
-
-      // Create order in database
-      // Create order in database
-const order = await Order.create({
-  order_number: orderNumber,
-  amount: finalAmount.toFixed(2),
-  amount_paid: finalAmount.toFixed(2),
-  original_amount: cart.total.toFixed(2),     // ✅ Correct field name
-  discount_amount: discount.toFixed(2),       // ✅ Correct field name (not 'discount')
-  coupon_code: appliedCoupon?.code || null,   // ✅ Correct field name (not 'coupon')
-  created_at: orderDate.toISOString(),
-  date: orderDate.toISOString(),
-  currency: 'USD',
-  group_id: customerId,
-  customer_id: customerId,
-  line_items: orderItems,
-  payment_method: 'CARD',
-  status: 'CONFIRMED',
-  orderNumberProvisional: orderNumber
-});
-
-console.log('[Agent] ✅ Order created in database:', {
-  _id: order._id,
-  orderNumber: order.order_number,
-  amount: order.amount,
-  original_amount: order.original_amount,         // ✅ Log correct field
-  discount_amount: order.discount_amount,         // ✅ Log correct field
-  coupon_code: order.coupon_code,                 // ✅ Log correct field
-  items: order.line_items.length
-});
-
-      // Clear cart and stored payment data
-      await this.clearCartItems(customerId);
-      pendingPayments.delete(customerId); // ✅ Clean up
-      console.log('[Agent] ✅ Cart cleared and payment data removed');
-
-      console.log('==================== PAYMENT SUCCESS END ====================\n');
-
-      // Build success message
-      let successMessage = `🎉 Payment successful! Your order #${orderNumber} has been placed.\n\n📦 Order Details:\n• ${orderItems.length} item${orderItems.length !== 1 ? 's' : ''}\n`;
-      
-      if (discount > 0 && appliedCoupon) {
-        successMessage += `• Original: $${cart.total}\n• Discount (${appliedCoupon.code}): -$${discount.toFixed(2)}\n• Total Paid: $${finalAmount.toFixed(2)} 💚\n`;
-      } else {
-        successMessage += `• Total: $${finalAmount.toFixed(2)}\n`;
-      }
-      
-      successMessage += `• Status: Confirmed\n\nYou'll receive updates as your order is prepared. Thank you! 🍽️`;
-
-      return {
-        aiText: successMessage,
-        intent: 'PAYMENT_SUCCESS',
-        productList: [],
-        addToCart: null,
-        cartData: null,
-        orderData: {
-          type: 'order_confirmation',
-          orders: [{
-            id: order._id.toString(),
-            orderNumber: order.order_number.toString(),
-            status: 'preparing',
-            date: orderDate.toLocaleDateString('en-US', {
-              year: 'numeric',
-              month: 'short',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
-            }),
-            total: finalAmount,
-            estimatedDelivery: this.getEstimatedDelivery(order),
-            items: orderItems.map(item => ({
-              name: item.product,
-              quantity: item.quantity,
-              price: parseFloat(item.price)
-            }))
-          }]
-        },
-        meta: {
-         // suggestions: ['View all orders', 'Place another order', 'View Menu'],
-          timestamp: new Date().toISOString()
-        }
-      };
-
-    } catch (error) {
-      console.error('\n==================== PAYMENT SUCCESS ERROR ====================');
-      console.error('[Agent] Error:', error);
-      console.error('[Agent] Stack:', error.stack);
-      console.error('================================================================\n');
-      
-      pendingPayments.delete(customerId); // Clean up on error
-      
-      return {
-        aiText: "There was an issue processing your order. Please contact support.",
-        intent: 'PAYMENT_SUCCESS',
-        productList: [],
-        addToCart: null,
-        cartData: null,
-        orderData: null,
-        meta: {
-          suggestions: ['Contact support', 'Try again'],
-          timestamp: new Date().toISOString()
-        }
-      };
-    }
-  }
+}
   
+  async clearCartAfterPayment(customerId) {
+  try {
+    console.log('[Agent]  Clearing cart after payment:', customerId);
+    
+    const cart = await Cart.findOne({ customer_id: customerId });
+    if (!cart) return;
+    
+    // Delete all cart items
+    await CartItem.deleteMany({ cart_id: cart.id });
+    console.log('[Agent]  Cart cleared');
+    
+    return { success: true };
+  } catch (error) {
+    console.error('[Agent] Error clearing cart:', error);
+    return { success: false };
+  }
+}
   async handleOrderStatus(customerId) {
   try {
     const orders = await Order.find({ 
@@ -807,7 +1111,7 @@ console.log('[Agent] ✅ Order created in database:', {
     
     if (orders.length === 0) {
       return { 
-        aiText: "You don't have any orders yet. Ready to place your first order? 🎯", 
+        aiText: "You don't have any orders yet. Ready to place your first order? ", 
         intent: 'ORDER_STATUS', 
         productList: [], 
         addToCart: null, 
@@ -843,6 +1147,13 @@ console.log('[Agent] ✅ Order created in database:', {
         originalAmount: hasDiscount ? originalAmount : null,
         discount: discountAmount,
         couponCode: o.coupon_code || null,
+        tax: (() => {  // ✅ ADD TAX CALCULATION
+      if (hasDiscount) {
+        const afterDiscount = originalAmount - discountAmount;
+        return afterDiscount * 0.08;
+      }
+      return finalAmount * 0.08;
+    })(),
         estimatedDelivery: this.getEstimatedDelivery(o), 
         items: (o.line_items || []).map(item => ({ 
           name: item.product || item.title || 'Unknown Item', 
@@ -863,10 +1174,6 @@ console.log('[Agent] ✅ Order created in database:', {
         type: 'order_tracking', 
         orders: orderList 
       }, 
-      meta: { 
-        //suggestions: ['Place new order', 'View Menu'], 
-        timestamp: new Date().toISOString() 
-      } 
     };
   } catch (error) {
     console.error('[Agent] Order status error:', error);
@@ -928,7 +1235,7 @@ console.log('[Agent] ✅ Order created in database:', {
     const originalAmount = order.original_amount ? parseFloat(order.original_amount) : finalAmount;
     const couponCode = order.coupon_code || null;
 
-    console.log('[Agent] 🔍 Order discount info:', {
+    console.log('[Agent]  Order discount info:', {
       orderId,
       discount_amount: order.discount_amount,
       original_amount: order.original_amount,
@@ -937,7 +1244,7 @@ console.log('[Agent] ✅ Order created in database:', {
       discountAmount
     });
 
-    // ✅ Format order details with discount info
+    //  Format order details with discount info
     const orderDetails = { 
       id: order._id.toString(), 
       orderNumber: order.order_number.toString(),
@@ -951,8 +1258,15 @@ console.log('[Agent] ✅ Order created in database:', {
       }), 
       total: finalAmount,
       originalAmount: hasDiscount ? originalAmount : null,
-      discount: hasDiscount ? discountAmount : null, // ✅ Only include if > 0
-      couponCode: hasDiscount ? couponCode : null, // ✅ Only include if discount exists
+      discount: hasDiscount ? discountAmount : null, //  Only include if > 0
+      couponCode: hasDiscount ? couponCode : null, //  Only include if discount exists
+      tax: (() => {  
+    if (hasDiscount) {
+      const afterDiscount = originalAmount - discountAmount;
+      return afterDiscount * 0.08; // 8% tax
+    }
+    return finalAmount * 0.08;
+  })(),
       estimatedDelivery: this.getEstimatedDelivery(order), 
       items: (order.line_items || []).map(item => ({ 
         name: item.product || item.title || 'Unknown Item', 
@@ -964,10 +1278,10 @@ console.log('[Agent] ✅ Order created in database:', {
     
     // ✅ Build detailed text message
     const statusText = this.getStatusText(orderDetails.status);
-    let responseText = `📦 **Order #${order.order_number}**\n\nStatus: ${statusText}\nDate: ${orderDetails.date}\n`;
+    let responseText = ` **Order #${order.order_number}**\n\nStatus: ${statusText}\nDate: ${orderDetails.date}\n`;
     
     if (hasDiscount) {
-      responseText += `\n💰 Payment:\nOriginal: $${originalAmount.toFixed(2)}\nDiscount${couponCode ? ` (${couponCode})` : ''}: -$${discountAmount.toFixed(2)}\nTotal Paid: $${finalAmount.toFixed(2)}\n`;
+      responseText += `\n Payment:\nOriginal: $${originalAmount.toFixed(2)}\nDiscount${couponCode ? ` (${couponCode})` : ''}: -$${discountAmount.toFixed(2)}\nTotal Paid: $${finalAmount.toFixed(2)}\n`;
     } else {
       responseText += `Total: $${orderDetails.total.toFixed(2)}\n`;
     }
@@ -982,10 +1296,10 @@ console.log('[Agent] ✅ Order created in database:', {
     });
     
     if (orderDetails.estimatedDelivery) { 
-      responseText += `\n⏰ Estimated delivery: ${orderDetails.estimatedDelivery}`; 
+      responseText += `\n Estimated delivery: ${orderDetails.estimatedDelivery}`; 
     }
     
-    console.log('[Agent] ✅ Order details prepared with discount:', {
+    console.log('[Agent]  Order details prepared with discount:', {
       orderNumber: orderDetails.orderNumber,
       hasDiscount,
       discount: discountAmount.toFixed(2),
@@ -1046,11 +1360,11 @@ getEstimatedDelivery(order) {
 
 getStatusText(status) {
   const statusTexts = { 
-    'preparing': '🍳 Being prepared', 
-    'ready': '✅ Ready for pickup', 
-    'out_for_delivery': '🚚 Out for delivery', 
-    'delivered': '✅ Delivered', 
-    'cancelled': '❌ Cancelled' 
+    'preparing': ' Being prepared', 
+    'ready': ' Ready for pickup', 
+    'out_for_delivery': ' Out for delivery', 
+    'delivered': ' Delivered', 
+    'cancelled': ' Cancelled' 
   };
   return statusTexts[status] || 'Processing';
 }
@@ -1110,7 +1424,7 @@ getStatusText(status) {
     const cart = await this.getCart(customerId);
 
     return {
-      aiText: `✅ Reordered items from Order #${orderId}! Your cart has been updated.`,
+      aiText: ` Reordered items from Order #${orderId}! Your cart has been updated.`,
       intent: 'REORDER',
       productList: [],
       cartData: {
@@ -1157,7 +1471,7 @@ getStatusText(status) {
   async handleClearCart(customerId) {
     try {
       await this.clearCartItems(customerId);
-      return { aiText: "Your cart has been cleared! 🗑️", intent: 'CLEAR_CART', productList: [], cartData: null, meta: { suggestions: ['View Menu', 'Browse Specials'], timestamp: new Date().toISOString() } };
+      return { aiText: "Your cart has been cleared! ", intent: 'CLEAR_CART', productList: [], cartData: null, meta: { suggestions: ['View Menu', 'Browse Specials'], timestamp: new Date().toISOString() } };
     } catch (error) {
       console.error('[Agent] Clear cart error:', error);
       return { aiText: "Error clearing cart. Please try again.", intent: 'CLEAR_CART', productList: [], cartData: null, meta: { suggestions: ['Try again', 'View cart'], timestamp: new Date().toISOString() } };
@@ -1214,7 +1528,7 @@ getStatusText(status) {
     const discountAmount = subtotal * (coupon.discount / 100);
     const newTotal = subtotal - discountAmount;
 
-    console.log('[Agent] ✅ Coupon applied:', {
+    console.log('[Agent]  Coupon applied:', {
       code: coupon.code,
       subtotal: subtotal,
       discount: discountAmount,
@@ -1223,7 +1537,7 @@ getStatusText(status) {
 
     // ✅ Return cart with coupon
     return {
-      aiText: `✅ Coupon ${coupon.code} applied! You saved $${discountAmount.toFixed(2)}`,
+      aiText: ` Coupon ${coupon.code} applied! You saved $${discountAmount.toFixed(2)}`,
       intent: 'APPLY_COUPON',
       productList: [],
       cartData: {
@@ -1267,7 +1581,7 @@ async handleRemoveCoupon(customerId) {
       };
     }
 
-    // ✅ Return cart without coupon
+    //  Return cart without coupon
     return {
       aiText: "Coupon removed from your cart.",
       intent: 'REMOVE_COUPON',
@@ -1339,7 +1653,7 @@ async handleRemoveCoupon(customerId) {
       console.log('==================== GET CART END (SUCCESS) ====================\n');
       return result;
     } catch (error) {
-      console.error('[Agent] ❌ Get cart error:', error);
+      console.error('[Agent]  Get cart error:', error);
       console.log('==================== GET CART END (ERROR) ====================\n');
       return { items: [], cartItems: [], cartTotal: 0, itemCount: 0, total: 0 };
     }
@@ -1354,17 +1668,17 @@ async handleRemoveCoupon(customerId) {
       console.log('\n[Step 1] Finding product...');
       const product = await Product.findById(productId);
       if (!product) {
-        console.log('[Agent] ❌ Product not found:', productId);
+        console.log('[Agent]  Product not found:', productId);
         throw new Error('Product not found');
       }
-      console.log('[Agent] ✅ Found product:', { _id: product._id, name: product.name, price: product.price });
+      console.log('[Agent]  Found product:', { _id: product._id, name: product.name, price: product.price });
       console.log('\n[Step 2] Getting/creating cart...');
       let cart = await Cart.findOne({ customer_id: customerId });
       if (!cart) {
         console.log('[Agent] Creating new cart...');
         cart = await Cart.create({ id: uuidv4(), customer_id: customerId, created_at: new Date(), updated_at: new Date() });
       }
-      console.log('[Agent] ✅ Using existing cart:', { _id: cart._id, id: cart.id, customer_id: cart.customer_id });
+      console.log('[Agent]  Using existing cart:', { _id: cart._id, id: cart.id, customer_id: cart.customer_id });
       console.log('\n[Step 3] Creating/updating cart item...');
       console.log('[Agent] Using product ID:', productId.toString());
       console.log('[Agent] Using cart ID:', cart.id);
@@ -1375,23 +1689,23 @@ async handleRemoveCoupon(customerId) {
         cartItem.quantity += quantity;
         cartItem.updated_at = new Date();
         await cartItem.save();
-        console.log('[Agent] ✅ Updated cart item:', { id: cartItem.id, quantity: cartItem.quantity });
+        console.log('[Agent]  Updated cart item:', { id: cartItem.id, quantity: cartItem.quantity });
       } else {
         console.log('[Agent] No existing item. Creating new cart item...');
         const itemData = { id: uuidv4(), cart_id: cart.id, productId: productId.toString(), title: product.name, unit_price: parseFloat(product.price), quantity: quantity, created_at: new Date(), updated_at: new Date() };
         console.log('[Agent] Cart item data to create:', itemData);
         cartItem = await CartItem.create(itemData);
-        console.log('[Agent] ✅ Created cart item:', { _id: cartItem._id, id: cartItem.id, cart_id: cartItem.cart_id, productId: cartItem.productId, quantity: cartItem.quantity });
+        console.log('[Agent]  Created cart item:', { _id: cartItem._id, id: cartItem.id, cart_id: cartItem.cart_id, productId: cartItem.productId, quantity: cartItem.quantity });
         const verifyItem = await CartItem.findOne({ id: cartItem.id });
         if (verifyItem) {
-          console.log('[Agent] ✅ Cart item verified in database');
+          console.log('[Agent]  Cart item verified in database');
         } else {
-          console.log('[Agent] ⚠️ Warning: Could not verify cart item in database');
+          console.log('[Agent]  Warning: Could not verify cart item in database');
         }
       }
       console.log('\n[Step 4] Final verification...');
       const allItems = await CartItem.find({ cart_id: cart.id });
-      console.log('[Agent] ✅ Total items in cart:', allItems.length);
+      console.log('[Agent]  Total items in cart:', allItems.length);
       console.log('[Agent] Cart items:', allItems.map(i => ({ id: i.id, productId: i.productId, title: i.title, quantity: i.quantity })));
       console.log('==================== ADD TO CART SUCCESS ====================\n');
       return cartItem;
@@ -1404,24 +1718,70 @@ async handleRemoveCoupon(customerId) {
     }
   }
 
-  async removeItemFromCart(customerId, productId) {
-    try {
-      const cart = await Cart.findOne({ customer_id: customerId });
-      if (!cart) return;
-      await CartItem.deleteOne({ cart_id: cart.id, productId: productId });
-      console.log('[Agent] ✅ Removed item from cart:', productId);
-    } catch (error) {
-      console.error('[Agent] Remove from cart error:', error);
-      throw error;
+ async removeItemFromCart(customerId, productId, quantity = null) {
+  try {
+    console.log('[Agent]  removeItemFromCart called:', {
+      customerId,
+      productId,
+      quantity: quantity || 'all'
+    });
+
+    const cart = await Cart.findOne({ customer_id: customerId });
+    if (!cart) {
+      console.log('[Agent]  No cart found');
+      return;
     }
+
+    // ✅ FIXED: Use productId (camelCase) instead of product_id
+    const cartItem = await CartItem.findOne({
+      cart_id: cart.id,
+      productId: productId  
+    });
+
+    if (!cartItem) {
+      console.log('[Agent]  Item not in cart:', productId);
+      console.log('[Agent]  Searched in cart:', cart.id);
+      
+      // Debug: List all items
+      const allItems = await CartItem.find({ cart_id: cart.id });
+      console.log('[Agent]  All cart items:', allItems.map(i => ({
+        id: i.id,
+        productId: i.productId,
+        title: i.title
+      })));
+      
+      return;
+    }
+
+    console.log('[Agent]  Found cart item:', {
+      id: cartItem.id,
+      title: cartItem.title,
+      currentQuantity: cartItem.quantity,
+      quantityToRemove: quantity || 'all'
+    });
+
+    // Handle quantity-based removal
+    if (quantity && quantity < cartItem.quantity) {
+      cartItem.quantity -= quantity;
+      cartItem.updated_at = new Date();
+      await cartItem.save();
+      console.log('[Agent]  Decreased quantity by', quantity, '→ new quantity:', cartItem.quantity);
+    } else {
+      await CartItem.deleteOne({ _id: cartItem._id });
+      console.log('[Agent]  Removed entire item from cart:', productId);
+    }
+  } catch (error) {
+    console.error('[Agent] Remove from cart error:', error);
+    throw error;
   }
+}
 
   async clearCartItems(customerId) {
     try {
       const cart = await Cart.findOne({ customer_id: customerId });
       if (!cart) return;
       await CartItem.deleteMany({ cart_id: cart.id });
-      console.log('[Agent] ✅ Cart cleared for customer:', customerId);
+      console.log('[Agent]  Cart cleared for customer:', customerId);
     } catch (error) {
       console.error('[Agent] Clear cart error:', error);
       throw error;
