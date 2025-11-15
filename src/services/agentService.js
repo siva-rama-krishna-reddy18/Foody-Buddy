@@ -105,8 +105,10 @@ class AgentService {
         cartTotal: cart.total || 0
       };
       response.intent = 'VIEW_CART';
-      response.aiText = ''; // ✅ REMOVE AI text when showing cart
-    }
+      console.log('[Agent] 🛒 Cart found, keeping AI text:', response.aiText);
+      }
+
+    
 
       // ✅ Extract orders from order_operations tool
     const orderResult = langchainResponse.toolResults.find(r => r.orders);
@@ -116,8 +118,8 @@ class AgentService {
         orders: orderResult.orders
       };
       response.intent = 'ORDER_STATUS';
-      response.aiText = ''; // ✅ REMOVE AI text when showing orders
-    }
+      console.log('[Agent] 📦 Orders found, keeping AI text:', response.aiText);
+      }
 
       return response;
 
@@ -142,7 +144,7 @@ if (message.toUpperCase().includes('PAYMENT SUCCESS')) {
 if (this.USE_LANGCHAIN && !message.startsWith('{')) {
   const langchainResponse = await this.processWithLangChain(customerId, message);
   if (langchainResponse) {
-    console.log('[Agent]  Using LangChain response');
+    console.log('[Agent] ✅ Using LangChain response with text:', langchainResponse.aiText);
     return langchainResponse;
   }
   console.log('[Agent]  LangChain failed, falling back to intent system');
