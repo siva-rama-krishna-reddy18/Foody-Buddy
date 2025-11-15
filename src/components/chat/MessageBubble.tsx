@@ -5,6 +5,8 @@ import { socket } from '../../lib/socket';
 import { useChatStore } from '../../stores/useChatStore';
 import { useCartStore } from '../../stores/useCartStore';
 
+
+
 interface OrderItem {
   id: string;
   orderNumber: string;
@@ -13,14 +15,16 @@ interface OrderItem {
   total: number;
   originalAmount?: number;
   discount?: number;
+  tax?: number;
   couponCode?: string;
   estimatedDelivery?: string;
   items: Array<{
     name: string;
     quantity: number;
     price: number;
-    specialInstructions?: string;
+    specialInstructions?: string | null;
   }>;
+  specialInstructions?: Record<string, string>; 
 }
 
 interface OrderTrackingData {
@@ -47,6 +51,7 @@ interface CartDisplay {
 interface PaymentData {
   total: number;
   subtotal?: number;
+  tax?: number;
   discount?: number;
   coupon?: {
     code: string;
@@ -190,66 +195,109 @@ const OrderTrackingComponent = ({
                   </div>
                 )}
 
-                {isDetailedView && (
-                  <div className="space-y-2 mb-3">
-                    {orderItems.map((item, index) => {
-                      const itemPrice = typeof item.price === 'number' ? item.price : parseFloat(String(item.price)) || 0;
-                      const itemQuantity = typeof item.quantity === 'number' ? item.quantity : parseInt(String(item.quantity)) || 1;
-                      
-                      return (
-                        <div key={index}>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-gray-700">
-                              {itemQuantity}x {item.name || 'Unknown Item'}
-                            </span>
-                            <span className="text-gray-600">${(itemPrice * itemQuantity).toFixed(2)}</span>
-                          </div>
-                          {(item as any).specialInstructions && (
-                            <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded mt-1">
-                              📝 {(item as any).specialInstructions}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                
-                {isDetailedView && hasDiscount && (
-                  <div className="border-t border-gray-200 pt-3 mb-3 space-y-2 text-sm bg-green-50 p-3 rounded-lg">
-                    <div className="flex justify-between text-gray-700">
-                      <span>Subtotal:</span>
-                      <span className="font-medium">${originalAmount.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-green-600 font-semibold">
-                      <span>💚 Discount {order.couponCode ? `(${order.couponCode})` : ''}:</span>
-                      <span>-${order.discount!.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between font-bold text-gray-900 border-t border-gray-300 pt-2">
-                      <span>Total Paid:</span>
-                      <span className="text-green-600">${orderTotal.toFixed(2)}</span>
-                    </div>
-                  </div>
-                )}
-                
-                <div className="flex space-x-2 mt-3">
-                  <button
-                    onClick={() => onReorderClick?.(order.orderNumber || order.id)}
-                    className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 py-2 px-3 rounded-lg text-sm font-medium flex items-center justify-center space-x-1 transition-colors"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    <span>Reorder</span>
-                  </button>
-                  
-                  {!isDetailedView && (
-                    <button
-                      onClick={() => onViewDetailsClick?.(order.orderNumber || order.id)}
-                      className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-600 py-2 px-3 rounded-lg text-sm font-medium transition-colors"
-                    >
-                      View Details
-                    </button>
-                  )}
-                </div>
+               {isDetailedView && (
+  <>
+    {/* Items List */}
+    <div className="space-y-2 mb-3">
+      {orderItems.map((item, index) => {
+        const itemPrice = typeof item.price === 'number' ? item.price : parseFloat(String(item.price)) || 0;
+        const itemQuantity = typeof item.quantity === 'number' ? item.quantity : parseInt(String(item.quantity)) || 1;
+        
+        return (
+          <div key={index}>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-700">
+                {itemQuantity}x {item.name || 'Unknown Item'}
+              </span>
+              <span className="text-gray-600">${(itemPrice * itemQuantity).toFixed(2)}</span>
+            </div>
+            {item.specialInstructions && (
+              <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded mt-1">
+                📝 {item.specialInstructions}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+
+    {/* Special Instructions (Order Level) */}
+    {order.specialInstructions && Object.keys(order.specialInstructions).length > 0 && (
+      <div className="mt-3 mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs">
+        <p className="font-semibold text-blue-800 mb-1">📝 Special Instructions:</p>
+        {Object.entries(order.specialInstructions as Record<string, string>).map(([key, instruction]) => (
+          <p key={key} className="text-blue-700">
+            • {instruction}
+          </p>
+        ))}
+      </div>
+    )}
+
+    {/* Order Summary with Subtotal, Discount, Tax, and Total */}
+    <div className={`border-t border-gray-200 pt-3 mb-3 space-y-2 text-sm ${hasDiscount ? 'bg-green-50' : 'bg-gray-50'} p-3 rounded-lg`}>
+      {/* Subtotal */}
+      <div className="flex justify-between text-gray-700">
+        <span>Subtotal:</span>
+        <span className="font-medium">${originalAmount.toFixed(2)}</span>
+      </div>
+
+      {/* Discount */}
+      {hasDiscount && (
+        <div className="flex justify-between text-green-600 font-semibold">
+          <span>💚 Discount {order.couponCode ? `(${order.couponCode})` : ''}:</span>
+          <span>-${order.discount!.toFixed(2)}</span>
+        </div>
+      )}
+
+      {/* Tax */}
+      {(() => {
+        let tax = 0;
+        if (order.tax) {
+          tax = typeof order.tax === 'number' ? order.tax : parseFloat(String(order.tax));
+        } else {
+          const afterDiscount = originalAmount - (order.discount || 0);
+          tax = afterDiscount * 0.08;
+        }
+
+        if (tax > 0) {
+          return (
+            <div className="flex justify-between text-gray-700">
+              <span>Tax (8%):</span>
+              <span className="font-medium">${tax.toFixed(2)}</span>
+            </div>
+          );
+        }
+        return null;
+      })()}
+
+      {/* Total */}
+      <div className="flex justify-between font-bold text-gray-900 border-t border-gray-300 pt-2 mt-2">
+        <span>Total Paid:</span>
+        <span className="text-green-600">${orderTotal.toFixed(2)}</span>
+      </div>
+    </div>
+  </>
+)}
+
+{/* Action Buttons */}
+<div className="flex space-x-2 mt-3">
+  <button
+    onClick={() => onReorderClick?.(order.orderNumber || order.id)}
+    className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 py-2 px-3 rounded-lg text-sm font-medium flex items-center justify-center space-x-1 transition-colors"
+  >
+    <RotateCcw className="w-4 h-4" />
+    <span>Reorder</span>
+  </button>
+  
+  {!isDetailedView && (
+    <button
+      onClick={() => onViewDetailsClick?.(order.orderNumber || order.id)}
+      className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-600 py-2 px-3 rounded-lg text-sm font-medium transition-colors"
+    >
+      View Details
+    </button>
+  )}
+               </div>
               </div>
             </div>
           );
@@ -259,13 +307,13 @@ const OrderTrackingComponent = ({
       <div className="mt-4 pt-4 border-t border-gray-200">
         <div className="flex space-x-2">
           <button
-            onClick={() => onSuggestionClick?.('Place new order')}
+            onClick={() => onSuggestionClick?.('')}
             className="flex-1 bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded-lg text-sm font-medium transition-colors"
           >
             Place New Order
           </button>
           <button
-            onClick={() => onSuggestionClick?.('View menu')}
+            onClick={() => onSuggestionClick?.('')}
             className="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg text-sm font-medium transition-colors"
           >
             Browse Menu
@@ -280,6 +328,7 @@ const OrderTrackingComponent = ({
 const PaymentComponent = ({
   orderTotal,
   orderSubtotal = 0,
+  orderTax = 0,
   orderDiscount = 0,
   orderCoupon,
   specialInstructions = {},
@@ -289,6 +338,7 @@ const PaymentComponent = ({
 }: {
   orderTotal: number;
   orderSubtotal?: number;
+  orderTax?: number;
   orderDiscount?: number;
   orderCoupon?: { code: string; discount: number; description: string };
   specialInstructions?: { [key: string]: string };
@@ -378,6 +428,7 @@ const PaymentComponent = ({
 
   if (paymentStep === 'review') {
     const hasDiscount = orderDiscount && orderDiscount > 0;
+    const hasTax = orderTax && orderTax > 0;  
     const hasInstructions = specialInstructions && Object.keys(specialInstructions).length > 0;
 
     return (
@@ -412,6 +463,13 @@ const PaymentComponent = ({
               <span className="font-medium">${(orderSubtotal || orderTotal).toFixed(2)}</span>
             </div>
             
+             {/* ✅ ADD TAX DISPLAY */}
+        {hasTax && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600">Tax (8%):</span>
+            <span className="font-medium">${orderTax.toFixed(2)}</span>
+          </div>
+        )}
             {hasDiscount && (
               <div className="flex justify-between text-sm text-green-600 font-medium">
                 <span>Discount {orderCoupon ? `(${orderCoupon.code})` : ''}:</span>
@@ -822,6 +880,8 @@ const CartDisplayComponent = ({
           <span className="text-gray-600">Subtotal:</span>
           <span className="font-medium">${subtotal.toFixed(2)}</span>
         </div>
+
+        
         
         {appliedCoupon && (
           <div className="flex justify-between text-sm text-green-600">
@@ -978,6 +1038,7 @@ export default function MessageBubble({ message, customerId }: Props) {
             <PaymentComponent
               orderTotal={payment.total}
               orderSubtotal={payment.subtotal}
+              orderTax={payment.tax} 
               orderDiscount={payment.discount}
               orderCoupon={payment.coupon}
               specialInstructions={payment.specialInstructions}

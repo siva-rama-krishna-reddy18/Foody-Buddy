@@ -36,6 +36,7 @@ interface CartState {
   updateFromChatData: (cartData: any) => void;
   setSpecialInstructions: (instructions: { [key: string]: string }) => void;
   setError: (error: string | null) => void;
+  updateCartWithDiscount: (subtotal: number, discount: number, total: number, coupon: Coupon | null) => void; // ✅ ADD THIS
 }
 
 export const useCartStore = create<CartState>((set, get) => {
@@ -240,8 +241,37 @@ export const useCartStore = create<CartState>((set, get) => {
       }, 100);
     },
 
+    // ✅ ADD THIS METHOD AT THE END (before setError)
+    updateCartWithDiscount: (subtotal: number, discount: number, total: number, coupon: Coupon | null) => {
+      console.log('[CartStore] 💰 Updating with discount:', { 
+        subtotal, 
+        discount, 
+        total, 
+        coupon 
+      });
+      
+      set({
+        subtotal,
+        discount,
+        total,
+        coupon
+      });
+      
+      // Verify state was updated
+      setTimeout(() => {
+        const currentState = get();
+        console.log('[CartStore] 🔍 Discount applied - Current state:', {
+          subtotal: currentState.subtotal,
+          discount: currentState.discount,
+          total: currentState.total,
+          coupon: currentState.coupon
+        });
+      }, 100);
+    },
+
     setError: (error: string | null) => {
       set({ error });
     }
   };
 });
+

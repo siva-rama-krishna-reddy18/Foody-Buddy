@@ -3,6 +3,7 @@ import { Send, Menu, MapPin, Tag, ShoppingCart, User, Link, Share2, MoreHorizont
 import { useChatStore } from '../../stores/useChatStore';
 import { useCartStore } from '../../stores/useCartStore';
 import MessageBubble from './MessageBubble';
+import { socket } from '../../lib/socket';
 
 interface Props {
   customerId: string;
@@ -15,16 +16,16 @@ export default function ChatContainer({ customerId }: Props) {
   const [showQuickActions, setShowQuickActions] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   // Chat store
-  const { messages, isLoading, sendMessage, aiThinking, initializeChat } = useChatStore();
+  const { messages, isLoading, sendMessage, aiThinking, initializeChat, langchainEnabled, toggleLangChain, langchainSessionActive } = useChatStore();
   
-  // ✅ Cart store - with all properties including discount and coupon
+  //  Cart store - with all properties including discount and coupon
   const { items: cartItems, total: cartTotal, subtotal: cartSubtotal, discount: cartDiscount, coupon: cartCoupon, specialInstructions, itemCount } = useCartStore();
   
   const [showWelcome, setShowWelcome] = useState(true);
 
-  // 🔍 Debug: Log cart state whenever it changes
+  //  Debug: Log cart state whenever it changes
   useEffect(() => {
-    console.log('🛒 SIDEBAR Cart State:', {
+    console.log(' SIDEBAR Cart State:', {
        cartItems: cartItems.length,
       cartTotal,
       cartSubtotal,
@@ -57,6 +58,70 @@ export default function ChatContainer({ customerId }: Props) {
     }
   }, [messages]);
 
+ useEffect(() => {
+    const handleCouponApplied = (data: any) => {
+      console.log('[ChatInterface]  Coupon applied event:', data);
+      if (data && data.code) {
+        const subtotal = parseFloat(data.originalTotal) || 0;
+        const discountAmount = parseFloat(data.discountAmount) || 0;
+        const newTotal = parseFloat(data.newTotal) || 0;
+
+        useCartStore.getState().updateCartWithDiscount(subtotal, discountAmount, newTotal, {
+          code: data.code,
+          discount: data.discount,
+          description: `${data.discount}% off your order`,
+        });
+      }
+    };
+
+    const handleLangchainResponse = (data: any) => {
+      console.log('[ChatInterface]  LangChain response:', data);
+
+      
+      if (
+        data.clearCart ||
+        data.clearCartAfterOrder ||
+        data?.toolResults?.some((r: any) => r.manualPaymentSuccess)
+      ) {
+        console.log('[ChatInterface]  Clearing cart after successful order...');
+        useCartStore.getState().clearCart();
+      }
+
+      //  Detect order/payment confirmation
+      if (data.text && /payment successful|order confirmed/i.test(data.text)) {
+        console.log('[ChatInterface]  Order confirmation:', data.text);
+      }
+
+      //  Detect payment link (mock payment)
+      const paymentLink = data.toolResults?.find(
+        (r: any) => r.link && r.link.includes('https://payments')
+      )?.link;
+      if (paymentLink) {
+        console.log('[ChatInterface]  Payment link received:', paymentLink);
+      }
+
+      //  Detect email confirmation
+      const emailResult = data.toolResults?.find((r: any) => r.sent || r.email);
+      if (emailResult) {
+        console.log('[ChatInterface]  Confirmation email sent:', emailResult);
+      }
+    };
+
+    const handleSessionCleared = (data: any) => {
+      console.log('[ChatInterface]  Session cleared:', data);
+    };
+
+    socket.on('coupon-applied', handleCouponApplied);
+    socket.on('langchain-response', handleLangchainResponse);
+    socket.on('session-cleared', handleSessionCleared);
+
+    return () => {
+      socket.off('coupon-applied', handleCouponApplied);
+      socket.off('langchain-response', handleLangchainResponse);
+      socket.off('session-cleared', handleSessionCleared);
+    };
+  }, []);
+
   const handleSendMessage = async () => {
     if (inputValue.trim() && !isLoading) {
       await sendMessage(inputValue, customerId);
@@ -82,15 +147,15 @@ export default function ChatContainer({ customerId }: Props) {
     const item = cartItems.find(i => i.productId === productId);
     if (!item) return;
     
-    console.log('🔄 Quantity update clicked:', { productId, currentQuantity, action, itemName: item.name });
+    console.log(' Quantity update clicked:', { productId, currentQuantity, action, itemName: item.name });
     
     if (action === 'decrease') {
       // Just say "remove one [item]" - backend will handle deletion if qty=1
-      console.log('➖ Sending: remove one', item.name);
+      console.log(' Sending: remove one', item.name);
       sendMessage(`remove one ${item.name}`, customerId);
     } else {
       // Just say "add [item] to cart" - backend will increase quantity
-      console.log('➕ Sending: add', item.name, 'to cart');
+      console.log('Sending: add', item.name, 'to cart');
       sendMessage(`add ${item.name} to cart`, customerId);
     }
   };
@@ -98,7 +163,7 @@ export default function ChatContainer({ customerId }: Props) {
   const handleRemoveItem = (productId: string) => {
     const item = cartItems.find(i => i.productId === productId);
     if (item) {
-      console.log('🗑️ Remove button clicked - sending: remove all', item.name);
+      console.log(' Remove button clicked - sending: remove all', item.name);
       sendMessage(`remove all ${item.name} from cart`, customerId);
     }
   };
@@ -197,9 +262,47 @@ export default function ChatContainer({ customerId }: Props) {
               {/* Rounded Chat Container Starts */}
               <div className="bg-white rounded-3xl  ml-5 mr-0 mt-0 mb-1 overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 90px)' }}>
                 {/* Description and Actions Row */}
-                <div className="px-6 py-4 flex items-center justify-between border-b border-gray-100 flex-shrink-0">
-                  {/* Left: Description */}
-                  <p className="text-sm text-black font-medium">Your personal food ordering assistant</p>
+<div className="px-6 py-4 flex items-center justify-between border-b border-gray-100 flex-shrink-0">
+  {/* Left: Description and LangChain Toggle */}
+  <div className="flex items-center space-x-4">
+    <p className="text-sm text-black font-medium">Your personal food ordering assistant</p>
+    
+    {/* ✅ LangChain Toggle */}
+    <label className="flex items-center space-x-2 cursor-pointer group">
+      <div className="relative">
+        <input
+          type="checkbox"
+          checked={langchainEnabled}
+          onChange={toggleLangChain}
+          className="sr-only peer"
+        />
+        <div className="w-11 h-6 bg-gray-300 rounded-full peer peer-checked:bg-green-500 transition-colors"></div>
+        <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+      </div>
+      <span className="text-xs font-medium text-gray-700 group-hover:text-gray-900">
+        {langchainEnabled ? (
+          <>🤖 AI Mode <span className="text-green-600">(with memory)</span></>
+        ) : (
+          <>💬 Standard Mode</>
+        )}
+      </span>
+    </label>
+
+    {/* Optional: Clear Session Button */}
+    {langchainEnabled && langchainSessionActive && (
+      <button
+        onClick={() => {
+          if (window.confirm('Clear conversation memory?')) {
+            useChatStore.getState().clearLangChainSession(customerId);
+          }
+        }}
+        className="text-xs px-3 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+        title="Clear LangChain conversation memory"
+      >
+        Clear Memory
+      </button>
+    )}
+  </div>
 
                   {/* Right: Action Buttons */}
                   <div className="flex items-center space-x-2">
